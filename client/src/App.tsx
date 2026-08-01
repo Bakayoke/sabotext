@@ -1711,6 +1711,11 @@ function Play({
         <button type="button" className="btn ghost dark sm" onClick={() => setTvMode((v) => !v)}>
           {tvMode ? s.tvModeOff : s.tvMode}
         </button>
+        {!tvMode && (
+          <button type="button" className="btn ghost dark sm hide-on-tv" onClick={onLeave}>
+            {s.leave}
+          </button>
+        )}
       </header>
 
       {room.youAreSpectator && !tvMode && <p className="banner soft">{s.spectator}</p>}

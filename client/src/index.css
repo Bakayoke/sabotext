@@ -466,6 +466,7 @@ button {
 .play-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.75rem;
   background: var(--surface);
   border-radius: 1rem;
