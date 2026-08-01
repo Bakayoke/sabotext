@@ -23,6 +23,32 @@ import { Confetti, useCountdown } from './ui'
 type Screen = 'home' | 'lobby' | 'play'
 
 const ROUND_OPTIONS = [4, 6, 8, 10]
+const FACTOPIA_URL = 'https://factopia.net'
+const PARTY_PATHS_URL = 'https://partypaths.com'
+
+function SisterLinks({
+  s,
+  compact,
+}: {
+  s: ReturnType<typeof t>
+  compact?: boolean
+}) {
+  const cls = `sister-game${compact ? ' compact' : ''}`
+  return (
+    <div className={`sister-stack${compact ? ' compact' : ''}`}>
+      <a className={cls} href={FACTOPIA_URL} target="_blank" rel="noreferrer">
+        <strong>Factopia</strong>
+        <span>{s.factopiaPitch}</span>
+        <em>{s.factopiaCta}</em>
+      </a>
+      <a className={cls} href={PARTY_PATHS_URL} target="_blank" rel="noreferrer">
+        <strong>Party Paths</strong>
+        <span>{s.partyPathsPitch}</span>
+        <em>{s.partyPathsCta}</em>
+      </a>
+    </div>
+  )
+}
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home')
@@ -273,6 +299,8 @@ function Home({
 
         {error && <p className="error">{error}</p>}
       </div>
+
+      <SisterLinks s={s} />
     </main>
   )
 }
@@ -712,6 +740,7 @@ function Winner({
       ) : (
         <p className="muted">{s.waiting}</p>
       )}
+      <SisterLinks s={s} compact />
       <button type="button" className="btn ghost" onClick={onLeave}>
         {s.leave}
       </button>

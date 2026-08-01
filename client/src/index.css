@@ -760,6 +760,67 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.sister-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  width: 100%;
+}
+
+.sister-stack.compact {
+  gap: 0.45rem;
+}
+
+.sister-game {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.95rem 1.05rem;
+  border-radius: 1rem;
+  text-decoration: none;
+  color: var(--text);
+  text-align: left;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #0f766e 16%, var(--surface)),
+      color-mix(in srgb, #f59e0b 10%, var(--surface))
+    );
+  border: 1px solid color-mix(in srgb, #0f766e 28%, transparent);
+  box-shadow: var(--shadow);
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.sister-game:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, #f59e0b 45%, transparent);
+}
+
+.sister-game strong {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
+  color: var(--brand-deep);
+}
+
+.sister-game span {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.sister-game em {
+  font-style: normal;
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: var(--accent-deep);
+  margin-top: 0.15rem;
+}
+
+.sister-game.compact {
+  padding: 0.8rem 0.95rem;
+}
+
 .winner-screen {
   background: var(--surface);
   border-radius: 1.35rem;

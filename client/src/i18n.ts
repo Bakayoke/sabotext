@@ -48,6 +48,10 @@ const sv = {
   needPlayers: 'Minst 2 spelare behövs',
   host: 'Värd',
   scoreboard: 'Ställning',
+  factopiaPitch: 'Hellre party-quiz? Utmana kompisarna på Factopia.',
+  factopiaCta: 'Öppna factopia.net →',
+  partyPathsPitch: 'Sug efter mer än SMS? Rösta er igenom ett partyäventyr.',
+  partyPathsCta: 'Prova Party Paths',
 }
 
 const en: typeof sv = {
@@ -98,6 +102,10 @@ const en: typeof sv = {
   needPlayers: 'Need at least 2 players',
   host: 'Host',
   scoreboard: 'Scoreboard',
+  factopiaPitch: 'Prefer a party quiz? Challenge your friends on Factopia.',
+  factopiaCta: 'Open factopia.net →',
+  partyPathsPitch: 'Want more than texts? Vote your way through a party adventure.',
+  partyPathsCta: 'Try Party Paths',
 }
 
 export type Strings = typeof sv
