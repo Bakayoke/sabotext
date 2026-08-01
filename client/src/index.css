@@ -911,11 +911,27 @@ button {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-.lobby-card strong {
-  letter-spacing: 0.18em;
-  font-size: 1.15rem;
-  font-family: var(--font-display);
-  color: var(--brand-deep);
+.lobby-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.party-pill {
+  font-size: 0.72rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  color: #1a1205 !important;
+}
+
+.price-was {
+  text-decoration: line-through;
+  opacity: 0.75;
 }
 
 .lobby-card span {

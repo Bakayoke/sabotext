@@ -10,6 +10,10 @@ export type FunnelEvent =
   | 'game_start'
   | 'game_finished'
   | 'share_results'
+  | 'lobby_almost_full'
+  | 'waitlist_upsell_shown'
+  | 'share_buy_click'
+  | 'party_renew_click'
 
 type Counters = Record<FunnelEvent, number>
 
@@ -25,6 +29,10 @@ const counters: Counters = {
   game_start: 0,
   game_finished: 0,
   share_results: 0,
+  lobby_almost_full: 0,
+  waitlist_upsell_shown: 0,
+  share_buy_click: 0,
+  party_renew_click: 0,
 }
 
 const recent: { event: FunnelEvent; at: number; meta?: string }[] = []

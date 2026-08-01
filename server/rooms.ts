@@ -298,6 +298,7 @@ export function unlockRoomWithPass(
   const pass = lookupPass(token)
   if (!pass) return { error: 'Party-passet är ogiltigt eller har gått ut' }
   room.premiumExpiresAt = pass.expiresAt
+  // Keep waitlist names so host sees who to ping — they can join freely now
   touch(room)
   return room
 }
@@ -450,6 +451,16 @@ export function startGame(code: string, playerId: string): Room | { error: strin
     room.premiumExpiresAt = null
     room.isPublic = false
     room.roundCount = clampRounds(room.roundCount, roomLimits(room).roundCounts)
+  }
+
+  const waitlist = room.waitlist ?? []
+  if (waitlist.length > 0 && tierFromExpiry(room.premiumExpiresAt) !== 'party') {
+    return {
+      error:
+        room.language === 'en'
+          ? `Don't start yet — ${waitlist.length} waiting. Unlock Party first.`
+          : `Starta inte än — ${waitlist.length} vill in. Lås upp Party först.`,
+    }
   }
 
   const players = playingPlayers(room).filter((p) => p.connected)

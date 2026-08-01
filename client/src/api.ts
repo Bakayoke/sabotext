@@ -507,7 +507,11 @@ export async function trackMetric(
     | 'public_requires_party'
     | 'game_start'
     | 'game_finished'
-    | 'share_results',
+    | 'share_results'
+    | 'lobby_almost_full'
+    | 'waitlist_upsell_shown'
+    | 'share_buy_click'
+    | 'party_renew_click',
   meta?: string,
 ) {
   try {
