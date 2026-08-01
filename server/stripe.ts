@@ -184,8 +184,8 @@ export async function createPartyCheckoutSession(opts: {
     if (opts.firstTime) {
       const coupon = await firstPartyCouponId(stripe)
       if (coupon) {
+        delete sessionParams.allow_promotion_codes
         sessionParams.discounts = [{ coupon }]
-        sessionParams.allow_promotion_codes = false
       }
     }
 
