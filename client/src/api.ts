@@ -22,6 +22,22 @@ export type HomePayload = {
   }
 }
 
+export type PublicLobbyCard = {
+  code: string
+  language: Lang
+  playerCount: number
+  maxPlayers: number
+  seatsLeft: number | null
+  roundCount: number
+  party: boolean
+}
+
+export type LobbiesPayload = {
+  lobbies: PublicLobbyCard[]
+  onlineRooms: number
+  activity?: HomePayload['activity']
+}
+
 export type Session = { code: string; playerId: string; name: string }
 
 export function loadSession(): Session | null {
@@ -378,6 +394,17 @@ export async function fetchHome(lang: Lang): Promise<HomePayload> {
     return (await res.json()) as HomePayload
   } catch {
     return fallback
+  }
+}
+
+export async function fetchLobbies(lang: Lang): Promise<LobbiesPayload> {
+  const empty: LobbiesPayload = { lobbies: [], onlineRooms: 0 }
+  try {
+    const res = await fetch(`${apiBase()}/api/lobbies?lang=${lang}`)
+    if (!res.ok) return empty
+    return (await res.json()) as LobbiesPayload
+  } catch {
+    return empty
   }
 }
 

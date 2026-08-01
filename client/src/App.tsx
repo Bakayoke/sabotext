@@ -9,6 +9,7 @@ import {
   createGame,
   ensureSessionBound,
   fetchHome,
+  fetchLobbies,
   fetchPartyInfo,
   fetchStripeHint,
   hasPaidBefore,
@@ -35,6 +36,7 @@ import {
   isWeekend,
   type HomePayload,
   type PartyInfo,
+  type PublicLobbyCard,
 } from './api'
 import { t } from './i18n'
 import { JoinQr } from './qr'
@@ -42,7 +44,7 @@ import { renderResultsImage } from './shareCard'
 import type { Lang, PartyPlan, PublicRoom } from './types'
 import { Confetti } from './ui'
 
-type Screen = 'home' | 'join' | 'lobby' | 'play' | 'guest-unlock'
+type Screen = 'home' | 'join' | 'find' | 'lobby' | 'play' | 'guest-unlock'
 
 const FREE_ROUND_OPTIONS = [8, 10, 12, 15]
 const PARTY_EXTRA_ROUNDS = [20, 25]
@@ -156,6 +158,7 @@ export default function App() {
   const [joinStep, setJoinStep] = useState<'code' | 'name'>('code')
   const [rounds, setRounds] = useState(10)
   const [lang, setLang] = useState<Lang>('sv')
+  const [lobbies, setLobbies] = useState<PublicLobbyCard[]>([])
   const [hostPlays, setHostPlaysLocal] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -232,6 +235,16 @@ export default function App() {
     void fetchPartyInfo().then(setPartyInfo)
     void fetchStripeHint().then(setStripeHint)
   }, [])
+
+  useEffect(() => {
+    if (screen !== 'home' && screen !== 'find') return
+    const load = () => {
+      void fetchLobbies(lang).then((res) => setLobbies(res.lobbies ?? []))
+    }
+    load()
+    const id = window.setInterval(load, 12_000)
+    return () => window.clearInterval(id)
+  }, [screen, lang])
 
   useEffect(() => {
     bindSocketHandlers({
@@ -457,9 +470,19 @@ export default function App() {
 
   function openJoin(code?: string) {
     setError(null)
-    if (code) setJoinCode(code)
-    setJoinStep(code && code.length === 4 ? 'name' : 'code')
+    if (code) {
+      setJoinCode(code)
+      setJoinStep('name')
+    } else {
+      setJoinCode('')
+      setJoinStep('code')
+    }
     setScreen('join')
+  }
+
+  function openFind() {
+    setError(null)
+    setScreen('find')
   }
 
   function leave() {
@@ -498,6 +521,8 @@ export default function App() {
             busy={busy}
             onCreate={handleCreate}
             onOpenJoin={() => openJoin()}
+            onOpenFind={openFind}
+            lobbyCount={lobbies.length}
             partyInfo={partyInfo}
             hasParty={hasParty}
             partyPass={partyPass}
@@ -537,6 +562,18 @@ export default function App() {
               if (joinStep === 'name') setJoinStep('code')
               else setScreen('home')
             }}
+          />
+        )}
+
+        {screen === 'find' && (
+          <FindScreen
+            s={s}
+            lobbies={lobbies}
+            onPick={(code) => openJoin(code)}
+            onQuickJoin={() => {
+              if (lobbies[0]) openJoin(lobbies[0].code)
+            }}
+            onBack={() => setScreen('home')}
           />
         )}
 
@@ -623,6 +660,8 @@ function Home({
   busy,
   onCreate,
   onOpenJoin,
+  onOpenFind,
+  lobbyCount,
   partyInfo,
   hasParty,
   partyPass,
@@ -655,6 +694,8 @@ function Home({
   busy: boolean
   onCreate: () => void
   onOpenJoin: () => void
+  onOpenFind: () => void
+  lobbyCount: number
   partyInfo: PartyInfo
   hasParty: boolean
   partyPass: { expiresAt: number } | null
@@ -816,11 +857,16 @@ function Home({
         </button>
 
         <div className="divider">
-          <span>eller</span>
+          <span>{s.orDivider}</span>
         </div>
 
         <button type="button" className="btn secondary" onClick={onOpenJoin}>
           {s.joinWithCode}
+        </button>
+
+        <button type="button" className="btn accent" onClick={onOpenFind}>
+          {s.findGame}
+          {lobbyCount > 0 ? ` · ${lobbyCount}` : ''}
         </button>
 
         {error && <p className="error">{error}</p>}
@@ -924,7 +970,7 @@ function JoinScreen({
     <main className="home">
       <header className="hero compact">
         <p className="brand">Sabotext</p>
-        <h1>{s.joinWithCode}</h1>
+        <h1>{joinStep === 'code' ? s.joinWithCode : s.enterName}</h1>
       </header>
       <div className="panel">
         {joinStep === 'code' ? (
@@ -968,8 +1014,68 @@ function JoinScreen({
             else onJoin()
           }}
         >
-          {joinStep === 'code' ? s.continueJoin : s.join}
+          {joinStep === 'code' ? s.continueCode : s.join}
         </button>
+        <button type="button" className="btn ghost" onClick={onBack}>
+          {s.back}
+        </button>
+      </div>
+    </main>
+  )
+}
+
+function FindScreen({
+  s,
+  lobbies,
+  onPick,
+  onQuickJoin,
+  onBack,
+}: {
+  s: ReturnType<typeof t>
+  lobbies: PublicLobbyCard[]
+  onPick: (code: string) => void
+  onQuickJoin: () => void
+  onBack: () => void
+}) {
+  return (
+    <main className="home">
+      <header className="hero compact">
+        <p className="brand">Sabotext</p>
+        <h1>{s.findGame}</h1>
+      </header>
+      <div className="panel">
+        <p className="section-title">{s.openLobbies}</p>
+        {lobbies.length === 0 ? (
+          <p className="footer-note">{s.noOpenLobbies}</p>
+        ) : (
+          <ul className="lobby-list">
+            {lobbies.map((lobby) => {
+              const seats =
+                lobby.seatsLeft == null
+                  ? s.unlimited
+                  : `${lobby.seatsLeft} ${s.seatsLeft}`
+              return (
+                <li key={lobby.code}>
+                  <button type="button" className="lobby-card" onClick={() => onPick(lobby.code)}>
+                    <strong>{lobby.code}</strong>
+                    <span>
+                      {lobby.playerCount} {s.participants.toLowerCase()} · {seats}
+                    </span>
+                    <span className="lobby-meta">
+                      {lobby.language.toUpperCase()}
+                      {lobby.party ? ' · Party' : ''} · {lobby.roundCount} {s.roundsShort}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        {lobbies[0] && (
+          <button type="button" className="btn primary" onClick={onQuickJoin}>
+            {s.quickJoin}
+          </button>
+        )}
         <button type="button" className="btn ghost" onClick={onBack}>
           {s.back}
         </button>
@@ -1070,11 +1176,6 @@ function Lobby({
   }
 
   async function changePublic(next: boolean) {
-    if (next && !isParty) {
-      onError(s.publicNeedsParty)
-      void trackMetric('public_requires_party', room.code)
-      return
-    }
     const res = await setPublicLobby(next)
     if (res.error) onError(res.error)
   }
@@ -1182,27 +1283,25 @@ function Lobby({
             />
             <span>{room.hostPlays ? s.hostPlays : s.hostOnly}</span>
           </label>
-          {isParty && (
-            <div className="public-toggle">
-              <span>{s.makePublic}</span>
-              <div className="pills">
-                <button
-                  type="button"
-                  className={room.isPublic ? 'pill on' : 'pill'}
-                  onClick={() => void changePublic(true)}
-                >
-                  {s.publicOn}
-                </button>
-                <button
-                  type="button"
-                  className={!room.isPublic ? 'pill on' : 'pill'}
-                  onClick={() => void changePublic(false)}
-                >
-                  {s.publicOff}
-                </button>
-              </div>
+          <div className="public-toggle">
+            <span>{s.makePublic}</span>
+            <div className="pills">
+              <button
+                type="button"
+                className={room.isPublic ? 'pill on' : 'pill'}
+                onClick={() => void changePublic(true)}
+              >
+                {s.publicOn}
+              </button>
+              <button
+                type="button"
+                className={!room.isPublic ? 'pill on' : 'pill'}
+                onClick={() => void changePublic(false)}
+              >
+                {s.publicOff}
+              </button>
             </div>
-          )}
+          </div>
         </div>
       )}
 

@@ -284,9 +284,6 @@ export function setPublicLobby(
   if (!room) return { error: 'Rummet finns inte' }
   if (room.hostId !== playerId) return { error: 'Bara värden kan ändra detta' }
   if (room.status !== 'lobby') return { error: 'Spelet har redan startat' }
-  if (isPublic && tierFromExpiry(room.premiumExpiresAt) !== 'party') {
-    return { error: 'Party krävs för öppna rum (Hitta spel)' }
-  }
   room.isPublic = Boolean(isPublic)
   touch(room)
   return room
@@ -368,7 +365,6 @@ export function listPublicLobbies(opts?: {
 
   for (const room of rooms.values()) {
     if (!room.isPublic || room.status !== 'lobby') continue
-    if (tierFromExpiry(room.premiumExpiresAt) !== 'party') continue
     if (lang && room.language !== lang) continue
     if (!room.players.some((p) => p.connected)) continue
     if (now - (room.updatedAt || 0) > 30 * 60 * 1000) continue
