@@ -180,7 +180,7 @@ export default function App() {
   const [connected, setConnected] = useState(false)
   const [name, setName] = useState(() => loadPreferredName())
   const [joinCode, setJoinCode] = useState('')
-  const [joinStep, setJoinStep] = useState<'choose' | 'code' | 'name' | 'scan'>('choose')
+  const [joinStep, setJoinStep] = useState<'code' | 'name' | 'scan'>('code')
   const [rounds, setRounds] = useState(10)
   const [lang, setLang] = useState<Lang>('sv')
   const [lobbies, setLobbies] = useState<PublicLobbyCard[]>([])
@@ -530,7 +530,7 @@ export default function App() {
       setJoinStep('name')
     } else {
       setJoinCode('')
-      setJoinStep('choose')
+      setJoinStep('code')
     }
     setScreen('join')
   }
@@ -545,7 +545,7 @@ export default function App() {
     setRoom(null)
     setPlayerId(null)
     setTvMode(false)
-    setJoinStep('choose')
+    setJoinStep('code')
     setScreen('home')
   }
 
@@ -617,7 +617,7 @@ export default function App() {
             onBack={() => {
               setError(null)
               if (joinStep === 'name') setJoinStep('code')
-              else if (joinStep === 'code' || joinStep === 'scan') setJoinStep('choose')
+              else if (joinStep === 'scan') setJoinStep('code')
               else setScreen('home')
             }}
           />
@@ -1079,21 +1079,14 @@ function JoinScreen({
   setName: (v: string) => void
   joinCode: string
   setJoinCode: (v: string) => void
-  joinStep: 'choose' | 'code' | 'name' | 'scan'
-  setJoinStep: (v: 'choose' | 'code' | 'name' | 'scan') => void
+  joinStep: 'code' | 'name' | 'scan'
+  setJoinStep: (v: 'code' | 'name' | 'scan') => void
   error: string | null
   busy: boolean
   onJoin: () => void
   onBack: () => void
 }) {
-  const title =
-    joinStep === 'choose'
-      ? s.join
-      : joinStep === 'scan'
-        ? s.scanQr
-        : joinStep === 'code'
-          ? s.enterCode
-          : s.enterName
+  const title = joinStep === 'scan' ? s.scanQr : joinStep === 'code' ? s.enterCode : s.enterName
 
   return (
     <main className="home">
@@ -1102,26 +1095,12 @@ function JoinScreen({
         <h1>{title}</h1>
       </header>
       <div className="panel">
-        {joinStep === 'choose' && (
-          <>
-            <p className="muted center">{s.joinChooseHint}</p>
-            <button type="button" className="btn primary" onClick={() => setJoinStep('code')}>
-              {s.enterCode}
-            </button>
-            <button type="button" className="btn secondary" onClick={() => setJoinStep('scan')}>
-              {s.scanQr}
-            </button>
-          </>
-        )}
-
         {joinStep === 'scan' && (
           <>
             <QrJoinScanner
               scanningLabel={s.scanningQr}
               unsupportedHint={s.qrUnsupported}
-              onError={() => {
-                /* scanner shows unsupportedHint inline */
-              }}
+              onError={() => {}}
               onCode={(code) => {
                 setJoinCode(code)
                 setJoinStep('name')
@@ -1134,18 +1113,31 @@ function JoinScreen({
         )}
 
         {joinStep === 'code' && (
-          <label className="field">
-            <span>{s.enterCode}</span>
-            <input
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4))}
-              maxLength={4}
-              placeholder="ABCD"
-              className="code-input"
-              autoCapitalize="characters"
-              autoFocus
-            />
-          </label>
+          <>
+            <label className="field">
+              <span>{s.enterCode}</span>
+              <input
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4))}
+                maxLength={4}
+                placeholder="ABCD"
+                className="code-input"
+                autoCapitalize="characters"
+                autoFocus
+              />
+            </label>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || joinCode.length < 4}
+              onClick={() => setJoinStep('name')}
+            >
+              {s.continueCode}
+            </button>
+            <button type="button" className="btn secondary" onClick={() => setJoinStep('scan')}>
+              {s.scanQr}
+            </button>
+          </>
         )}
 
         {joinStep === 'name' && (
@@ -1164,33 +1156,18 @@ function JoinScreen({
             <p className="footer-note">
               {s.code}: <strong className="big-code inline">{joinCode}</strong>
             </p>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || !name.trim() || joinCode.length < 4}
+              onClick={onJoin}
+            >
+              {s.join}
+            </button>
           </>
         )}
 
         {error && <p className="error">{error}</p>}
-
-        {joinStep === 'code' && (
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || joinCode.length < 4}
-            onClick={() => setJoinStep('name')}
-          >
-            {s.continueCode}
-          </button>
-        )}
-
-        {joinStep === 'name' && (
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || !name.trim() || joinCode.length < 4}
-            onClick={onJoin}
-          >
-            {s.join}
-          </button>
-        )}
-
         <button type="button" className="btn ghost" onClick={onBack}>
           {s.back}
         </button>
