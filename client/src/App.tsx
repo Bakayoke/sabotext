@@ -17,6 +17,7 @@ import {
   submitSabotage,
 } from './api'
 import { t } from './i18n'
+import { JoinQr } from './qr'
 import type { Lang, PublicRoom } from './types'
 import { Confetti, useCountdown } from './ui'
 
@@ -62,8 +63,30 @@ export default function App() {
   const [hostPlays, setHostPlaysLocal] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [tvMode, setTvMode] = useState(false)
 
   const s = t(room?.language ?? lang)
+
+  useEffect(() => {
+    const app = document.querySelector('.app')
+    app?.classList.toggle('tv', tvMode)
+    if (tvMode) {
+      void document.documentElement.requestFullscreen?.().catch(() => null)
+    } else if (document.fullscreenElement) {
+      void document.exitFullscreen?.().catch(() => null)
+    }
+    return () => {
+      app?.classList.remove('tv')
+    }
+  }, [tvMode])
+
+  useEffect(() => {
+    const onFs = () => {
+      if (!document.fullscreenElement) setTvMode(false)
+    }
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
 
   useEffect(() => {
     bindSocketHandlers({
@@ -104,6 +127,7 @@ export default function App() {
     saveSession({ code: res.room.code, playerId: res.playerId, name: name.trim() || 'Spelare' })
     setPlayerId(res.playerId)
     setRoom(res.room)
+    setTvMode(!hostPlays)
     setScreen('lobby')
   }
 
@@ -126,11 +150,12 @@ export default function App() {
     clearSession()
     setRoom(null)
     setPlayerId(null)
+    setTvMode(false)
     setScreen('home')
   }
 
   return (
-    <div className="app">
+    <div className={`app${tvMode ? ' tv' : ''}`}>
       <div className="atmosphere" aria-hidden>
         <div className="glow glow-a" />
         <div className="glow glow-b" />
@@ -167,6 +192,8 @@ export default function App() {
             room={room}
             playerId={playerId}
             s={s}
+            tvMode={tvMode}
+            setTvMode={setTvMode}
             onLeave={leave}
             onError={setError}
             error={error}
@@ -174,7 +201,14 @@ export default function App() {
         )}
 
         {screen === 'play' && room && playerId && (
-          <Play room={room} playerId={playerId} s={s} onLeave={leave} />
+          <Play
+            room={room}
+            playerId={playerId}
+            s={s}
+            tvMode={tvMode}
+            setTvMode={setTvMode}
+            onLeave={leave}
+          />
         )}
       </div>
     </div>
@@ -309,6 +343,8 @@ function Lobby({
   room,
   playerId,
   s,
+  tvMode,
+  setTvMode,
   onLeave,
   onError,
   error,
@@ -316,19 +352,22 @@ function Lobby({
   room: PublicRoom
   playerId: string
   s: ReturnType<typeof t>
+  tvMode: boolean
+  setTvMode: (v: boolean | ((prev: boolean) => boolean)) => void
   onLeave: () => void
   onError: (e: string | null) => void
   error: string | null
 }) {
   const isHost = room.hostId === playerId
   const [copied, setCopied] = useState(false)
+  const [showQr, setShowQr] = useState(false)
   const inviteUrl = `${window.location.origin}/?join=${room.code}`
   const playing = room.players.filter((p) => p.playing)
   const canStart = playing.filter((p) => p.connected).length >= 2
 
-  async function copy() {
+  async function copy(text: string = inviteUrl) {
     try {
-      await navigator.clipboard.writeText(inviteUrl)
+      await navigator.clipboard.writeText(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
@@ -337,20 +376,55 @@ function Lobby({
   }
 
   return (
-    <main className="lobby">
+    <main className={`lobby${tvMode ? ' tv-lobby' : ''}`}>
+      {showQr && (
+        <div className="qr-overlay" role="dialog" aria-label={s.showQr}>
+          <JoinQr url={inviteUrl} size={320} alt={`QR ${room.code}`} />
+          <div className="big-code">{room.code}</div>
+          <p className="muted">{s.scanToJoin}</p>
+          <button type="button" className="btn secondary" onClick={() => void copy()}>
+            {copied ? s.copied : s.copyLink}
+          </button>
+          <button type="button" className="btn ghost dark" onClick={() => setShowQr(false)}>
+            {s.hideQr}
+          </button>
+        </div>
+      )}
+
       <header className="lobby-head">
-        <p className="brand sm">Sabotext</p>
+        <div className="lobby-top">
+          <p className="brand sm">Sabotext</p>
+          <div className="lobby-actions">
+            <button type="button" className="btn ghost dark sm" onClick={() => setTvMode((v) => !v)}>
+              {tvMode ? s.tvModeOff : s.tvMode}
+            </button>
+            {!tvMode && (
+              <button type="button" className="btn ghost dark sm hide-on-tv" onClick={() => setShowQr(true)}>
+                {s.showQr}
+              </button>
+            )}
+          </div>
+        </div>
         <div className="code-block">
           <span className="label">{s.code}</span>
           <strong className="big-code">{room.code}</strong>
         </div>
-        <button type="button" className="btn ghost" onClick={copy}>
-          {copied ? s.copied : s.share}
-        </button>
+        <div className="invite-qr">
+          <JoinQr url={inviteUrl} size={tvMode ? 280 : 180} alt={`QR ${room.code}`} />
+          <span>{tvMode ? s.joinOnPhone : s.scanToJoin}</span>
+        </div>
+        {!tvMode && (
+          <>
+            <p className="muted center hide-on-tv">{s.inviteHint}</p>
+            <button type="button" className="btn ghost dark hide-on-tv" onClick={() => void copy()}>
+              {copied ? s.copied : s.share}
+            </button>
+          </>
+        )}
       </header>
 
-      {isHost && (
-        <div className="panel tight">
+      {isHost && !tvMode && (
+        <div className="panel tight hide-on-tv">
           <div className="row">
             <label className="field grow">
               <span>{s.rounds}</span>
@@ -398,9 +472,9 @@ function Lobby({
         </div>
       )}
 
-      <section className="panel">
+      <section className={`panel${tvMode ? ' tv-players-panel' : ''}`}>
         <h2>{s.players}</h2>
-        <ul className="player-list">
+        <ul className={`player-list${tvMode ? ' tv-players' : ''}`}>
           {room.players.map((p) => (
             <li key={p.id} className={!p.connected ? 'dim' : undefined}>
               <span>
@@ -433,7 +507,7 @@ function Lobby({
 
       {error && <p className="error">{error}</p>}
 
-      <button type="button" className="btn ghost" onClick={onLeave}>
+      <button type="button" className="btn ghost hide-on-tv" onClick={onLeave}>
         {s.leave}
       </button>
     </main>
@@ -444,11 +518,15 @@ function Play({
   room,
   playerId,
   s,
+  tvMode,
+  setTvMode,
   onLeave,
 }: {
   room: PublicRoom
   playerId: string
   s: ReturnType<typeof t>
+  tvMode: boolean
+  setTvMode: (v: boolean | ((prev: boolean) => boolean)) => void
   onLeave: () => void
 }) {
   const isHost = room.hostId === playerId
@@ -456,11 +534,11 @@ function Play({
   const { seconds, ratio } = useCountdown(room.endsAt || null, totalMs)
 
   if (room.status === 'finished') {
-    return <Winner room={room} s={s} isHost={isHost} onLeave={onLeave} />
+    return <Winner room={room} s={s} isHost={isHost} tvMode={tvMode} setTvMode={setTvMode} onLeave={onLeave} />
   }
 
   return (
-    <main className="play">
+    <main className={`play${tvMode ? ' tv-play' : ''}`}>
       <header className="play-bar">
         <p className="brand sm">Sabotext</p>
         <span className="meta">
@@ -472,13 +550,16 @@ function Play({
             <span>{seconds}s</span>
           </div>
         )}
+        <button type="button" className="btn ghost dark sm" onClick={() => setTvMode((v) => !v)}>
+          {tvMode ? s.tvModeOff : s.tvMode}
+        </button>
       </header>
 
-      {room.youAreSpectator && <p className="banner soft">{s.spectator}</p>}
+      {room.youAreSpectator && !tvMode && <p className="banner soft">{s.spectator}</p>}
 
-      {room.status === 'write' && <WritePhase room={room} s={s} />}
-      {room.status === 'sabotage' && <SabotagePhase room={room} s={s} />}
-      {room.status === 'vote' && <VotePhase room={room} s={s} />}
+      {room.status === 'write' && <WritePhase room={room} s={s} tvMode={tvMode} />}
+      {room.status === 'sabotage' && <SabotagePhase room={room} s={s} tvMode={tvMode} />}
+      {room.status === 'vote' && <VotePhase room={room} s={s} tvMode={tvMode} />}
       {room.status === 'reveal' && <RevealPhase room={room} s={s} />}
 
       <ScoreStrip room={room} playerId={playerId} />
@@ -498,12 +579,12 @@ function PromptCard({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) 
   )
 }
 
-function WritePhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
+function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
 
-  if (!room.youAreWriter) {
+  if (!room.youAreWriter || tvMode) {
     return (
       <section className="phase wait">
         <PromptCard room={room} s={s} />
@@ -549,7 +630,7 @@ function WritePhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) 
   )
 }
 
-function SabotagePhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
+function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
   const [text, setText] = useState(room.yourSabotage ?? room.originalText ?? '')
   const [err, setErr] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -561,7 +642,7 @@ function SabotagePhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.originalText, room.yourSabotage])
 
-  if (room.youAreWriter || room.youAreSpectator) {
+  if (room.youAreWriter || room.youAreSpectator || tvMode) {
     return (
       <section className="phase wait">
         <PromptCard room={room} s={s} />
@@ -621,13 +702,13 @@ function SabotagePhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> 
   )
 }
 
-function VotePhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
+function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
   const [err, setErr] = useState<string | null>(null)
 
   return (
     <section className="phase">
       <h2>{s.voteTitle}</h2>
-      <p className="muted">{s.voteHint}</p>
+      {!tvMode && <p className="muted">{s.voteHint}</p>}
       <div className="bubble original compact">
         <span>{s.original}</span>
         <p>{room.originalText}</p>
@@ -635,7 +716,7 @@ function VotePhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
       <div className="vote-grid">
         {room.submissions.map((sub) => {
           const selected = room.yourVote === sub.id
-          const disabled = Boolean(sub.isYours) || room.youAreSpectator
+          const disabled = Boolean(sub.isYours) || room.youAreSpectator || Boolean(tvMode)
           return (
             <button
               key={sub.id}
@@ -650,8 +731,8 @@ function VotePhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
               }}
             >
               <p>{sub.text}</p>
-              {sub.isYours && <span className="tag">{s.yourVersion}</span>}
-              {selected && <span className="tag on">{s.voted}</span>}
+              {sub.isYours && !tvMode && <span className="tag">{s.yourVersion}</span>}
+              {selected && !tvMode && <span className="tag on">{s.voted}</span>}
             </button>
           )
         })}
@@ -700,11 +781,15 @@ function Winner({
   room,
   s,
   isHost,
+  tvMode,
+  setTvMode,
   onLeave,
 }: {
   room: PublicRoom
   s: ReturnType<typeof t>
   isHost: boolean
+  tvMode: boolean
+  setTvMode: (v: boolean | ((prev: boolean) => boolean)) => void
   onLeave: () => void
 }) {
   const ranked = [...room.players].filter((p) => p.playing).sort((a, b) => b.score - a.score)
@@ -713,7 +798,12 @@ function Winner({
   return (
     <main className="winner-screen">
       <Confetti />
-      <p className="brand">Sabotext</p>
+      <div className="lobby-top" style={{ marginBottom: '0.5rem' }}>
+        <p className="brand">Sabotext</p>
+        <button type="button" className="btn ghost dark sm" onClick={() => setTvMode((v) => !v)}>
+          {tvMode ? s.tvModeOff : s.tvMode}
+        </button>
+      </div>
       <h1>{s.winner}</h1>
       {champ && (
         <p className="champ">
@@ -740,8 +830,8 @@ function Winner({
       ) : (
         <p className="muted">{s.waiting}</p>
       )}
-      <SisterLinks s={s} compact />
-      <button type="button" className="btn ghost" onClick={onLeave}>
+      {!tvMode && <SisterLinks s={s} compact />}
+      <button type="button" className="btn ghost dark hide-on-tv" onClick={onLeave}>
         {s.leave}
       </button>
     </main>

@@ -52,6 +52,17 @@ const sv = {
   factopiaCta: 'Öppna factopia.net →',
   partyPathsPitch: 'Sug efter mer än SMS? Rösta er igenom ett partyäventyr.',
   partyPathsCta: 'Prova Party Paths',
+  scanToJoin: 'Skanna för att gå med',
+  showQr: 'Visa QR',
+  hideQr: 'Stäng QR',
+  copyLink: 'Kopiera länk',
+  joinOnPhone: 'Gå med i telefonen',
+  tvMode: 'TV-läge',
+  tvModeOn: 'TV-läge på',
+  tvModeOff: 'TV-läge av',
+  fullscreen: 'Helskärm',
+  exitFullscreen: 'Avsluta helskärm',
+  inviteHint: 'Dela länken eller låt dem skanna QR-koden.',
 }
 
 const en: typeof sv = {
@@ -106,6 +117,17 @@ const en: typeof sv = {
   factopiaCta: 'Open factopia.net →',
   partyPathsPitch: 'Want more than texts? Vote your way through a party adventure.',
   partyPathsCta: 'Try Party Paths',
+  scanToJoin: 'Scan to join',
+  showQr: 'Show QR',
+  hideQr: 'Close QR',
+  copyLink: 'Copy link',
+  joinOnPhone: 'Join on your phone',
+  tvMode: 'TV mode',
+  tvModeOn: 'TV mode on',
+  tvModeOff: 'TV mode off',
+  fullscreen: 'Fullscreen',
+  exitFullscreen: 'Exit fullscreen',
+  inviteHint: 'Share the link or let them scan the QR code.',
 }
 
 export type Strings = typeof sv
