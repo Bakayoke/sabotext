@@ -1,5 +1,29 @@
 export type Lang = 'sv' | 'en'
 
+export type PremiumTier = 'free' | 'party'
+
+export type PremiumLimits = {
+  /** 0 = unlimited */
+  maxPlayers: number
+  roundCounts: number[]
+}
+
+export type MatchHighlight = {
+  round: number
+  promptTask: string
+  originalText: string
+  winnerText: string
+  authorName: string
+  votes: number
+}
+
+export type PartyPlan = 'day' | 'week'
+
+export type PartyPassLocal = {
+  token: string
+  expiresAt: number
+}
+
 export type Player = {
   id: string
   name: string
@@ -54,4 +78,10 @@ export type PublicRoom = {
   endsAt: number
   lastRound: RoundResult[] | null
   phaseSeconds: number
+  premiumTier: PremiumTier
+  premiumExpiresAt: number | null
+  limits: PremiumLimits
+  isPublic: boolean
+  waitlist: { id: string; name: string; at: number }[]
+  highlights: MatchHighlight[]
 }

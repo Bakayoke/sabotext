@@ -1,31 +1,65 @@
 import { useEffect, useState } from 'react'
 import {
+  activateParty,
+  applyStoredPartyToken,
   bindSocketHandlers,
   castVote,
+  claimPartySession,
   clearSession,
   createGame,
   ensureSessionBound,
+  fetchPartyInfo,
+  fetchStripeHint,
+  hasPaidBefore,
   joinGame,
+  loadPartyPass,
+  loadPreferredName,
   loadSession,
+  markPaidBefore,
   rematchGame,
+  redeemParty,
+  savePartyPass,
+  savePreferredName,
   saveSession,
   setHostPlaying,
   setLanguage,
+  setPublicLobby,
   setRoundCount,
   startGame,
+  startPartyCheckout,
   submitOriginal,
   submitSabotage,
+  trackMetric,
+  isWeekend,
+  type PartyInfo,
 } from './api'
 import { t } from './i18n'
 import { JoinQr } from './qr'
-import type { Lang, PublicRoom } from './types'
+import { renderResultsImage } from './shareCard'
+import type { Lang, PartyPlan, PublicRoom } from './types'
 import { Confetti, useCountdown } from './ui'
 
-type Screen = 'home' | 'lobby' | 'play'
+type Screen = 'home' | 'lobby' | 'play' | 'guest-unlock'
 
-const ROUND_OPTIONS = [4, 6, 8, 10]
+const FREE_ROUND_OPTIONS = [4, 6, 8, 10]
+const PARTY_EXTRA_ROUNDS = [12, 16]
 const FACTOPIA_URL = 'https://factopia.net'
 const PARTY_PATHS_URL = 'https://partypaths.com'
+const PENDING_ROOM_KEY = 'sabotext-pending-room'
+const RESUME_CHECKOUT_KEY = 'sabotext-resume-checkout'
+
+function joinUrl(code: string) {
+  const url = new URL(window.location.origin)
+  url.searchParams.set('join', code.toUpperCase())
+  return url.toString()
+}
+
+function formatExpiry(ts: number, lang: Lang) {
+  return new Date(ts).toLocaleString(lang === 'en' ? 'en-GB' : 'sv-SE', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  })
+}
 
 function SisterLinks({
   s,
@@ -51,12 +85,70 @@ function SisterLinks({
   )
 }
 
+function PartyBuyPanel({
+  s,
+  buyDayLabel,
+  buyWeekLabel,
+  checkoutBusy,
+  onBuyParty,
+  urgent,
+  primaryLabel,
+}: {
+  s: ReturnType<typeof t>
+  buyDayLabel: string
+  buyWeekLabel: string
+  checkoutBusy: boolean
+  onBuyParty: (plan?: PartyPlan) => void
+  urgent?: boolean
+  primaryLabel?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const weekend = isWeekend()
+  if (!open) {
+    return (
+      <div className={`party-plans${urgent ? ' urgent' : ''}`}>
+        <button
+          type="button"
+          className="btn party"
+          disabled={checkoutBusy}
+          onClick={() => setOpen(true)}
+        >
+          {checkoutBusy ? s.buyPartyBusy : primaryLabel || s.unlockPartyFrom}
+        </button>
+        <p className="footer-note">{s.payWithSwish}</p>
+      </div>
+    )
+  }
+  return (
+    <div className={`party-plans${urgent ? ' urgent' : ''}`}>
+      <p className="party-hint">{s.choosePlan}</p>
+      <button
+        type="button"
+        className="btn party"
+        disabled={checkoutBusy}
+        onClick={() => onBuyParty(weekend ? 'week' : 'day')}
+      >
+        {checkoutBusy ? s.buyPartyBusy : weekend ? buyWeekLabel : buyDayLabel}
+      </button>
+      <button
+        type="button"
+        className="btn secondary"
+        disabled={checkoutBusy}
+        onClick={() => onBuyParty(weekend ? 'day' : 'week')}
+      >
+        {weekend ? buyDayLabel : buyWeekLabel}
+      </button>
+      <p className="footer-note">{s.payWithSwish}</p>
+    </div>
+  )
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home')
   const [room, setRoom] = useState<PublicRoom | null>(null)
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
-  const [name, setName] = useState('')
+  const [name, setName] = useState(() => loadPreferredName())
   const [joinCode, setJoinCode] = useState('')
   const [rounds, setRounds] = useState(6)
   const [lang, setLang] = useState<Lang>('sv')
@@ -64,8 +156,52 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [tvMode, setTvMode] = useState(false)
+  const [partyPass, setPartyPass] = useState(() => loadPartyPass())
+  const [partyInfo, setPartyInfo] = useState<PartyInfo>({
+    enabled: false,
+    amountOre: 3900,
+    amountLabel: '39 kr',
+    durationHours: 24,
+    weekAmountOre: 9900,
+    weekAmountLabel: '99 kr',
+    weekDurationHours: 168,
+  })
+  const [partyFlash, setPartyFlash] = useState('')
+  const [checkoutBusy, setCheckoutBusy] = useState(false)
+  const [ownerCode, setOwnerCode] = useState('')
+  const [showOwnerCode, setShowOwnerCode] = useState(false)
+  const [stripeHint, setStripeHint] = useState<string | null>(null)
+  const [fullRoomCode, setFullRoomCode] = useState('')
+  const [fullWaitlistCount, setFullWaitlistCount] = useState(0)
+  const [resumeCheckout, setResumeCheckout] = useState<{
+    roomCode?: string
+    plan: PartyPlan
+  } | null>(() => {
+    try {
+      const raw = sessionStorage.getItem(RESUME_CHECKOUT_KEY)
+      return raw ? (JSON.parse(raw) as { roomCode?: string; plan: PartyPlan }) : null
+    } catch {
+      return null
+    }
+  })
 
-  const s = t(room?.language ?? lang)
+  const uiLang = room?.language ?? lang
+  const s = t(uiLang)
+  const hasParty = Boolean(partyPass && partyPass.expiresAt > Date.now())
+  const firstTime = !hasPaidBefore()
+  const weekend = isWeekend()
+  const defaultPlan: PartyPlan = weekend ? 'week' : 'day'
+  const dayPrice =
+    firstTime && partyInfo.firstPartyDayLabel ? partyInfo.firstPartyDayLabel : partyInfo.amountLabel
+  const weekPrice =
+    firstTime && partyInfo.firstPartyWeekLabel
+      ? partyInfo.firstPartyWeekLabel
+      : partyInfo.weekAmountLabel ?? '99 kr'
+  const buyDayLabel = `Party · ${dayPrice} · 24 h${firstTime ? ' (−30%)' : ''}`
+  const buyWeekLabel = `Party · ${weekPrice} · 7 ${uiLang === 'en' ? 'days' : 'dagar'}${firstTime ? ' (−30%)' : ''}`
+  const homeRoundOptions = hasParty
+    ? [...FREE_ROUND_OPTIONS, ...PARTY_EXTRA_ROUNDS]
+    : FREE_ROUND_OPTIONS
 
   useEffect(() => {
     const app = document.querySelector('.app')
@@ -86,6 +222,11 @@ export default function App() {
     }
     document.addEventListener('fullscreenchange', onFs)
     return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
+
+  useEffect(() => {
+    void fetchPartyInfo().then(setPartyInfo)
+    void fetchStripeHint().then(setStripeHint)
   }, [])
 
   useEffect(() => {
@@ -115,9 +256,152 @@ export default function App() {
     })()
   }, [])
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const sessionId = params.get('party_session')
+    const cancelled = params.get('party_cancel')
+    const roomFromUrl = params.get('room')?.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4)
+    if (!sessionId && !cancelled) return
+
+    const clean = () => {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('party_session')
+      url.searchParams.delete('party_cancel')
+      url.searchParams.delete('room')
+      window.history.replaceState({}, '', url.pathname + url.search)
+    }
+
+    const pendingRoom =
+      roomFromUrl ||
+      (() => {
+        try {
+          return sessionStorage.getItem(PENDING_ROOM_KEY) || ''
+        } catch {
+          return ''
+        }
+      })()
+
+    if (cancelled) {
+      setPartyFlash(s.checkoutCancelledHint)
+      void trackMetric('checkout_cancel', pendingRoom || undefined)
+      clean()
+      if (pendingRoom) {
+        try {
+          sessionStorage.setItem(
+            RESUME_CHECKOUT_KEY,
+            JSON.stringify({ roomCode: pendingRoom, plan: defaultPlan }),
+          )
+        } catch {
+          // ignore
+        }
+        setResumeCheckout({ roomCode: pendingRoom, plan: defaultPlan })
+        try {
+          sessionStorage.removeItem(PENDING_ROOM_KEY)
+        } catch {
+          // ignore
+        }
+      }
+      return
+    }
+
+    setCheckoutBusy(true)
+    void claimPartySession(sessionId!).then(async (res) => {
+      setCheckoutBusy(false)
+      clean()
+      if (res.error || !res.token || !res.expiresAt) {
+        setError(res.error || s.somethingWrong)
+        return
+      }
+      const pass = { token: res.token, expiresAt: res.expiresAt }
+      savePartyPass(pass)
+      setPartyPass(pass)
+      markPaidBefore()
+      setPartyFlash(s.partyUnlocked)
+      setResumeCheckout(null)
+      try {
+        sessionStorage.removeItem(RESUME_CHECKOUT_KEY)
+      } catch {
+        // ignore
+      }
+      void fetchPartyInfo().then(setPartyInfo)
+
+      const targetRoom = (res.roomCode || pendingRoom || '').toUpperCase()
+      try {
+        sessionStorage.removeItem(PENDING_ROOM_KEY)
+      } catch {
+        // ignore
+      }
+
+      const session = loadSession()
+      if (targetRoom && session?.code === targetRoom) {
+        setBusy(true)
+        const bound = await ensureSessionBound(5)
+        setBusy(false)
+        if (bound && !bound.error && bound.room) {
+          setPlayerId(bound.playerId)
+          setRoom(bound.room)
+          setScreen(bound.room.status === 'lobby' ? 'lobby' : 'play')
+          await applyStoredPartyToken()
+        }
+      } else if (targetRoom && !session) {
+        setJoinCode(targetRoom)
+        setPartyFlash(s.partyUnlocked)
+      } else if (session) {
+        await applyStoredPartyToken()
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function onBuyParty(roomCode?: string, plan: PartyPlan = defaultPlan) {
+    setError(null)
+    setCheckoutBusy(true)
+    if (roomCode) {
+      try {
+        sessionStorage.setItem(PENDING_ROOM_KEY, roomCode.toUpperCase())
+        sessionStorage.setItem(RESUME_CHECKOUT_KEY, JSON.stringify({ roomCode, plan }))
+      } catch {
+        // ignore
+      }
+    } else {
+      try {
+        sessionStorage.setItem(RESUME_CHECKOUT_KEY, JSON.stringify({ plan }))
+      } catch {
+        // ignore
+      }
+    }
+    if (roomCode && !loadSession()) {
+      void trackMetric('guest_unlock_click', roomCode)
+    }
+    const res = await startPartyCheckout(uiLang, roomCode, plan, firstTime)
+    if (res.error || !res.url) {
+      setCheckoutBusy(false)
+      const hint = stripeHint || (await fetchStripeHint())
+      setError(partyInfo.enabled ? res.error || s.somethingWrong : hint || s.stripeMissing)
+      return
+    }
+    window.location.href = res.url
+  }
+
+  async function onRedeemOwnerCode(code: string) {
+    setError(null)
+    setCheckoutBusy(true)
+    const res = await redeemParty(code.trim())
+    setCheckoutBusy(false)
+    if (res.error || !res.token || !res.expiresAt) {
+      setError(res.error || s.somethingWrong)
+      return
+    }
+    const pass = { token: res.token, expiresAt: res.expiresAt }
+    savePartyPass(pass)
+    setPartyPass(pass)
+    setPartyFlash(s.partyUnlocked)
+  }
+
   async function handleCreate() {
     setError(null)
     setBusy(true)
+    savePreferredName(name)
     const res = await createGame(name, rounds, hostPlays, lang)
     setBusy(false)
     if (res.error || !res.room || !res.playerId) {
@@ -134,8 +418,16 @@ export default function App() {
   async function handleJoin() {
     setError(null)
     setBusy(true)
+    savePreferredName(name)
     const res = await joinGame(joinCode, name)
     setBusy(false)
+    if (res.code === 'ROOM_FULL' || (res.error && res.error.toLowerCase().includes('fullt'))) {
+      const roomCode = (res.roomCode || joinCode).toUpperCase()
+      setFullRoomCode(roomCode)
+      setFullWaitlistCount(res.waitlistCount ?? 1)
+      setScreen('guest-unlock')
+      return
+    }
     if (res.error || !res.room || !res.playerId) {
       setError(res.error || 'Error')
       return
@@ -163,9 +455,7 @@ export default function App() {
       </div>
 
       <div className="shell">
-        {!connected && (
-          <div className="banner">{s.offline}</div>
-        )}
+        {!connected && <div className="banner">{s.offline}</div>}
 
         {screen === 'home' && (
           <Home
@@ -176,6 +466,7 @@ export default function App() {
             setJoinCode={setJoinCode}
             rounds={rounds}
             setRounds={setRounds}
+            roundOptions={homeRoundOptions}
             lang={lang}
             setLang={setLang}
             hostPlays={hostPlays}
@@ -184,7 +475,53 @@ export default function App() {
             busy={busy}
             onCreate={handleCreate}
             onJoin={handleJoin}
+            partyInfo={partyInfo}
+            hasParty={hasParty}
+            partyPass={partyPass}
+            partyFlash={partyFlash}
+            firstTime={firstTime}
+            buyDayLabel={buyDayLabel}
+            buyWeekLabel={buyWeekLabel}
+            checkoutBusy={checkoutBusy}
+            onBuyParty={(plan) => void onBuyParty(undefined, plan || defaultPlan)}
+            resumeCheckout={resumeCheckout}
+            onResumeCheckout={(plan) =>
+              void onBuyParty(resumeCheckout?.roomCode, plan || resumeCheckout?.plan || defaultPlan)
+            }
+            showOwnerCode={showOwnerCode}
+            setShowOwnerCode={setShowOwnerCode}
+            ownerCode={ownerCode}
+            setOwnerCode={setOwnerCode}
+            onRedeemOwnerCode={onRedeemOwnerCode}
           />
+        )}
+
+        {screen === 'guest-unlock' && (
+          <main className="home">
+            <div className="panel">
+              <p className="section-title">{s.guestUnlockTitle}</p>
+              <p className="party-pitch">{s.guestUnlockBody}</p>
+              <p className="footer-note">
+                {s.code}: <strong className="big-code inline">{fullRoomCode}</strong>
+                {fullWaitlistCount > 0 ? ` · ${fullWaitlistCount} ${s.waitingToJoin.toLowerCase()}` : ''}
+              </p>
+              <p className="footer-note">{s.priceAnchorDay}</p>
+              {firstTime && <p className="party-flash">{s.firstPartyDeal}</p>}
+              <PartyBuyPanel
+                s={s}
+                buyDayLabel={buyDayLabel}
+                buyWeekLabel={buyWeekLabel}
+                checkoutBusy={checkoutBusy}
+                onBuyParty={(plan) => void onBuyParty(fullRoomCode, plan || defaultPlan)}
+                urgent
+                primaryLabel={s.unlockForEveryone}
+              />
+              {error && <p className="error">{error}</p>}
+              <button type="button" className="btn ghost" onClick={() => setScreen('home')}>
+                {s.back}
+              </button>
+            </div>
+          </main>
         )}
 
         {screen === 'lobby' && room && playerId && (
@@ -197,6 +534,12 @@ export default function App() {
             onLeave={leave}
             onError={setError}
             error={error}
+            partyInfo={partyInfo}
+            buyDayLabel={buyDayLabel}
+            buyWeekLabel={buyWeekLabel}
+            checkoutBusy={checkoutBusy}
+            onBuyParty={(plan) => void onBuyParty(room.code, plan || defaultPlan)}
+            firstTime={firstTime}
           />
         )}
 
@@ -208,6 +551,12 @@ export default function App() {
             tvMode={tvMode}
             setTvMode={setTvMode}
             onLeave={leave}
+            onError={setError}
+            partyInfo={partyInfo}
+            buyDayLabel={buyDayLabel}
+            buyWeekLabel={buyWeekLabel}
+            checkoutBusy={checkoutBusy}
+            onBuyParty={(plan) => void onBuyParty(room.code, plan || defaultPlan)}
           />
         )}
       </div>
@@ -223,6 +572,7 @@ function Home({
   setJoinCode,
   rounds,
   setRounds,
+  roundOptions,
   lang,
   setLang,
   hostPlays,
@@ -231,6 +581,22 @@ function Home({
   busy,
   onCreate,
   onJoin,
+  partyInfo,
+  hasParty,
+  partyPass,
+  partyFlash,
+  firstTime,
+  buyDayLabel,
+  buyWeekLabel,
+  checkoutBusy,
+  onBuyParty,
+  resumeCheckout,
+  onResumeCheckout,
+  showOwnerCode,
+  setShowOwnerCode,
+  ownerCode,
+  setOwnerCode,
+  onRedeemOwnerCode,
 }: {
   s: ReturnType<typeof t>
   name: string
@@ -239,6 +605,7 @@ function Home({
   setJoinCode: (v: string) => void
   rounds: number
   setRounds: (v: number) => void
+  roundOptions: number[]
   lang: Lang
   setLang: (v: Lang) => void
   hostPlays: boolean
@@ -247,6 +614,22 @@ function Home({
   busy: boolean
   onCreate: () => void
   onJoin: () => void
+  partyInfo: PartyInfo
+  hasParty: boolean
+  partyPass: { expiresAt: number } | null
+  partyFlash: string
+  firstTime: boolean
+  buyDayLabel: string
+  buyWeekLabel: string
+  checkoutBusy: boolean
+  onBuyParty: (plan?: PartyPlan) => void
+  resumeCheckout: { roomCode?: string; plan: PartyPlan } | null
+  onResumeCheckout: (plan?: PartyPlan) => void
+  showOwnerCode: boolean
+  setShowOwnerCode: (v: boolean) => void
+  ownerCode: string
+  setOwnerCode: (v: string) => void
+  onRedeemOwnerCode: (code: string) => void
 }) {
   return (
     <main className="home">
@@ -255,6 +638,12 @@ function Home({
         <h1>{s.tagline}</h1>
         <p className="lede">{s.subtitle}</p>
       </header>
+
+      <ol className="how-to">
+        <li>{s.howTo1}</li>
+        <li>{s.howTo2}</li>
+        <li>{s.howTo3}</li>
+      </ol>
 
       <div className="panel">
         <label className="field">
@@ -272,7 +661,7 @@ function Home({
           <label className="field grow">
             <span>{s.rounds}</span>
             <div className="pills">
-              {ROUND_OPTIONS.map((n) => (
+              {roundOptions.map((n) => (
                 <button
                   key={n}
                   type="button"
@@ -334,6 +723,64 @@ function Home({
         {error && <p className="error">{error}</p>}
       </div>
 
+      {partyInfo.enabled && (
+        <div className="panel party-home">
+          <p className="section-title">{s.party}</p>
+          <p className="party-pitch">{s.partyPitch}</p>
+          <p className="footer-note">{s.freeTierOk}</p>
+          {hasParty && partyPass ? (
+            <p className="footer-note">
+              {s.partyActive} · {s.partyUntil} {formatExpiry(partyPass.expiresAt, lang)}
+            </p>
+          ) : (
+            <>
+              <p className="party-hint">{s.buyPartyHint}</p>
+              <p className="footer-note">{s.priceAnchorDay}</p>
+              {firstTime && <p className="party-flash">{s.firstPartyDeal}</p>}
+              <PartyBuyPanel
+                s={s}
+                buyDayLabel={buyDayLabel}
+                buyWeekLabel={buyWeekLabel}
+                checkoutBusy={checkoutBusy}
+                onBuyParty={onBuyParty}
+              />
+              {resumeCheckout && (
+                <button
+                  type="button"
+                  className="btn accent"
+                  disabled={checkoutBusy}
+                  onClick={() => onResumeCheckout(resumeCheckout.plan)}
+                >
+                  {s.resumeCheckout}
+                </button>
+              )}
+              <button type="button" className="btn-tiny" onClick={() => setShowOwnerCode(!showOwnerCode)}>
+                {showOwnerCode ? s.hideCode : s.haveCode}
+              </button>
+              {showOwnerCode && (
+                <div className="party-redeem">
+                  <input
+                    value={ownerCode}
+                    onChange={(e) => setOwnerCode(e.target.value)}
+                    placeholder={s.partyCode}
+                    maxLength={64}
+                  />
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={checkoutBusy || !ownerCode.trim()}
+                    onClick={() => onRedeemOwnerCode(ownerCode)}
+                  >
+                    {s.activate}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          {partyFlash && <p className="party-flash">{partyFlash}</p>}
+        </div>
+      )}
+
       <SisterLinks s={s} />
     </main>
   )
@@ -348,6 +795,12 @@ function Lobby({
   onLeave,
   onError,
   error,
+  partyInfo,
+  buyDayLabel,
+  buyWeekLabel,
+  checkoutBusy,
+  onBuyParty,
+  firstTime,
 }: {
   room: PublicRoom
   playerId: string
@@ -357,13 +810,33 @@ function Lobby({
   onLeave: () => void
   onError: (e: string | null) => void
   error: string | null
+  partyInfo: PartyInfo
+  buyDayLabel: string
+  buyWeekLabel: string
+  checkoutBusy: boolean
+  onBuyParty: (plan?: PartyPlan) => void
+  firstTime: boolean
 }) {
   const isHost = room.hostId === playerId
+  const isParty = room.premiumTier === 'party'
   const [copied, setCopied] = useState(false)
   const [showQr, setShowQr] = useState(false)
-  const inviteUrl = `${window.location.origin}/?join=${room.code}`
+  const [partyCode, setPartyCode] = useState('')
+  const [showCode, setShowCode] = useState(false)
+  const [localBusy, setLocalBusy] = useState(false)
+  const inviteUrl = joinUrl(room.code)
   const playing = room.players.filter((p) => p.playing)
   const canStart = playing.filter((p) => p.connected).length >= 2
+  const waitlist = room.waitlist ?? []
+  const maxPlayers = room.limits?.maxPlayers ?? 5
+  const almostFull = !isParty && maxPlayers > 0 && playing.length >= maxPlayers - 1
+  const isFull = !isParty && maxPlayers > 0 && playing.length >= maxPlayers
+  const blockStart = isHost && !isParty && waitlist.length > 0
+  const roundOptions = room.limits?.roundCounts ?? FREE_ROUND_OPTIONS
+
+  useEffect(() => {
+    if (isHost) void applyStoredPartyToken()
+  }, [isHost])
 
   async function copy(text: string = inviteUrl) {
     try {
@@ -375,6 +848,45 @@ function Lobby({
     }
   }
 
+  async function shareInvite() {
+    const text =
+      room.language === 'en'
+        ? `Join my Sabotext game: ${room.code}\n${inviteUrl}`
+        : `Gå med i mitt Sabotext-spel: ${room.code}\n${inviteUrl}`
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: 'Sabotext', text, url: inviteUrl })
+        return
+      }
+    } catch {
+      // fall through
+    }
+    void copy(text)
+  }
+
+  async function onUnlockParty() {
+    setLocalBusy(true)
+    onError(null)
+    const res = await activateParty(partyCode.trim())
+    setLocalBusy(false)
+    if (res.error || !res.token || !res.expiresAt) {
+      onError(res.error || s.somethingWrong)
+      return
+    }
+    savePartyPass({ token: res.token, expiresAt: res.expiresAt })
+    await applyStoredPartyToken()
+  }
+
+  async function changePublic(next: boolean) {
+    if (next && !isParty) {
+      onError(s.publicNeedsParty)
+      void trackMetric('public_requires_party', room.code)
+      return
+    }
+    const res = await setPublicLobby(next)
+    if (res.error) onError(res.error)
+  }
+
   return (
     <main className={`lobby${tvMode ? ' tv-lobby' : ''}`}>
       {showQr && (
@@ -382,8 +894,8 @@ function Lobby({
           <JoinQr url={inviteUrl} size={320} alt={`QR ${room.code}`} />
           <div className="big-code">{room.code}</div>
           <p className="muted">{s.scanToJoin}</p>
-          <button type="button" className="btn secondary" onClick={() => void copy()}>
-            {copied ? s.copied : s.copyLink}
+          <button type="button" className="btn secondary" onClick={() => void shareInvite()}>
+            {copied ? s.copied : s.shareInvite}
           </button>
           <button type="button" className="btn ghost dark" onClick={() => setShowQr(false)}>
             {s.hideQr}
@@ -416,12 +928,21 @@ function Lobby({
         {!tvMode && (
           <>
             <p className="muted center hide-on-tv">{s.inviteHint}</p>
-            <button type="button" className="btn ghost dark hide-on-tv" onClick={() => void copy()}>
-              {copied ? s.copied : s.share}
-            </button>
+            <div className="share-row hide-on-tv">
+              <button type="button" className="btn ghost dark" onClick={() => void shareInvite()}>
+                {s.shareInvite}
+              </button>
+              <button type="button" className="btn ghost dark" onClick={() => void copy()}>
+                {copied ? s.copied : s.copyLink}
+              </button>
+            </div>
           </>
         )}
       </header>
+
+      {playing.length > 0 && playing.length < 3 && isHost && !tvMode && (
+        <p className="recommend-hint hide-on-tv">{s.recommend3}</p>
+      )}
 
       {isHost && !tvMode && (
         <div className="panel tight hide-on-tv">
@@ -429,7 +950,7 @@ function Lobby({
             <label className="field grow">
               <span>{s.rounds}</span>
               <div className="pills">
-                {ROUND_OPTIONS.map((n) => (
+                {roundOptions.map((n) => (
                   <button
                     key={n}
                     type="button"
@@ -469,6 +990,73 @@ function Lobby({
             />
             <span>{room.hostPlays ? s.hostPlays : s.hostOnly}</span>
           </label>
+          {isParty && (
+            <div className="public-toggle">
+              <span>{s.makePublic}</span>
+              <div className="pills">
+                <button
+                  type="button"
+                  className={room.isPublic ? 'pill on' : 'pill'}
+                  onClick={() => void changePublic(true)}
+                >
+                  {s.publicOn}
+                </button>
+                <button
+                  type="button"
+                  className={!room.isPublic ? 'pill on' : 'pill'}
+                  onClick={() => void changePublic(false)}
+                >
+                  {s.publicOff}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isHost && isParty && !tvMode && (
+        <div className="party-banner on hide-on-tv">
+          <strong>{s.partyActive}</strong>
+          <p>
+            {room.premiumExpiresAt
+              ? `${s.partyActiveUntil} ${formatExpiry(room.premiumExpiresAt, room.language)}`
+              : s.partyActive}
+          </p>
+        </div>
+      )}
+
+      {isHost && !isParty && !tvMode && (almostFull || isFull || waitlist.length > 0) && (
+        <div className={`party-banner urgent-inline hide-on-tv`}>
+          <p className="party-hint">
+            {waitlist.length > 0 || isFull ? s.roomFullUpsell : s.roomAlmostFull}
+          </p>
+          <p className="footer-note">{s.priceAnchorDay}</p>
+          {firstTime && <p className="party-flash">{s.firstPartyDeal}</p>}
+          <PartyBuyPanel
+            s={s}
+            buyDayLabel={buyDayLabel}
+            buyWeekLabel={buyWeekLabel}
+            checkoutBusy={checkoutBusy}
+            onBuyParty={onBuyParty}
+            urgent
+          />
+          <button type="button" className="btn-tiny" onClick={() => setShowCode((v) => !v)}>
+            {showCode ? s.hideCode : s.haveCode}
+          </button>
+          {showCode && (
+            <div className="party-redeem">
+              <input
+                value={partyCode}
+                onChange={(e) => setPartyCode(e.target.value.toUpperCase())}
+                placeholder={s.partyCode}
+                maxLength={64}
+              />
+              <button type="button" className="btn secondary" disabled={localBusy} onClick={() => void onUnlockParty()}>
+                {s.activate}
+              </button>
+            </div>
+          )}
+          {!partyInfo.enabled && <p className="footer-note">{s.buyPartySoon}</p>}
         </div>
       )}
 
@@ -486,21 +1074,42 @@ function Lobby({
             </li>
           ))}
         </ul>
+        {isHost && waitlist.length > 0 && (
+          <>
+            <p className="waitlist-head">
+              <span>{s.waitingToJoin}</span>
+              <span>{waitlist.length}</span>
+            </p>
+            <ul className="player-list waitlist">
+              {waitlist.map((w) => (
+                <li key={w.id}>
+                  <span>{w.name}</span>
+                  <span>🔒</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </section>
 
       {isHost ? (
-        <button
-          type="button"
-          className="btn primary"
-          disabled={!canStart}
-          onClick={async () => {
-            onError(null)
-            const res = await startGame()
-            if (res.error) onError(res.error)
-          }}
-        >
-          {canStart ? s.start : s.needPlayers}
-        </button>
+        <>
+          {blockStart && (
+            <p className="party-hint center">{s.startBlockedWaitlist.replace('{n}', String(waitlist.length))}</p>
+          )}
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!canStart || blockStart}
+            onClick={async () => {
+              onError(null)
+              const res = await startGame()
+              if (res.error) onError(res.error)
+            }}
+          >
+            {blockStart ? s.unlockThenStart : canStart ? s.start : s.needPlayers}
+          </button>
+        </>
       ) : (
         <p className="muted center">{s.waiting}</p>
       )}
@@ -521,6 +1130,12 @@ function Play({
   tvMode,
   setTvMode,
   onLeave,
+  onError,
+  partyInfo,
+  buyDayLabel,
+  buyWeekLabel,
+  checkoutBusy,
+  onBuyParty,
 }: {
   room: PublicRoom
   playerId: string
@@ -528,13 +1143,35 @@ function Play({
   tvMode: boolean
   setTvMode: (v: boolean | ((prev: boolean) => boolean)) => void
   onLeave: () => void
+  onError: (msg: string | null) => void
+  partyInfo: PartyInfo
+  buyDayLabel: string
+  buyWeekLabel: string
+  checkoutBusy: boolean
+  onBuyParty: (plan?: PartyPlan) => void
 }) {
   const isHost = room.hostId === playerId
   const totalMs = (room.phaseSeconds || 30) * 1000
   const { seconds, ratio } = useCountdown(room.endsAt || null, totalMs)
 
   if (room.status === 'finished') {
-    return <Winner room={room} s={s} isHost={isHost} tvMode={tvMode} setTvMode={setTvMode} onLeave={onLeave} />
+    return (
+      <Winner
+        room={room}
+        playerId={playerId}
+        s={s}
+        isHost={isHost}
+        tvMode={tvMode}
+        setTvMode={setTvMode}
+        onLeave={onLeave}
+        onError={onError}
+        partyInfo={partyInfo}
+        buyDayLabel={buyDayLabel}
+        buyWeekLabel={buyWeekLabel}
+        checkoutBusy={checkoutBusy}
+        onBuyParty={onBuyParty}
+      />
+    )
   }
 
   return (
@@ -747,16 +1384,29 @@ function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof
 
 function RevealPhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
   const winner = room.lastRound?.[0]
+
+  useEffect(() => {
+    navigator.vibrate?.([40, 30, 60])
+  }, [])
+
   return (
     <section className="phase">
       <h2>{s.revealTitle}</h2>
       {winner && winner.votes > 0 && (
-        <div className="winner-bubble">
-          <span>{s.winner}: {winner.authorName}</span>
-          <p>{winner.text}</p>
-          <em>
-            +{winner.gained} {s.points} · {winner.votes} {s.votes}
-          </em>
+        <div className="reveal-compare">
+          <div className="bubble original">
+            <span>{s.original}</span>
+            <p>{room.originalText}</p>
+          </div>
+          <div className="bubble winner-side">
+            <span>
+              {s.winningSabotage}: {winner.authorName}
+            </span>
+            <p>{winner.text}</p>
+            <em>
+              +{winner.gained} {s.points} · {winner.votes} {s.votes}
+            </em>
+          </div>
         </div>
       )}
       <ul className="results">
@@ -779,21 +1429,127 @@ function RevealPhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> })
 
 function Winner({
   room,
+  playerId,
   s,
   isHost,
   tvMode,
   setTvMode,
   onLeave,
+  onError,
+  partyInfo,
+  buyDayLabel,
+  buyWeekLabel,
+  checkoutBusy,
+  onBuyParty,
 }: {
   room: PublicRoom
+  playerId: string
   s: ReturnType<typeof t>
   isHost: boolean
   tvMode: boolean
   setTvMode: (v: boolean | ((prev: boolean) => boolean)) => void
   onLeave: () => void
+  onError: (msg: string | null) => void
+  partyInfo: PartyInfo
+  buyDayLabel: string
+  buyWeekLabel: string
+  checkoutBusy: boolean
+  onBuyParty: (plan?: PartyPlan) => void
 }) {
   const ranked = [...room.players].filter((p) => p.playing).sort((a, b) => b.score - a.score)
   const champ = ranked[0]
+  const isYou = champ?.id === playerId
+  const [busy, setBusy] = useState(false)
+  const [shareFlash, setShareFlash] = useState('')
+  const [showShareNudge, setShowShareNudge] = useState(true)
+  const invite = joinUrl(room.code)
+  const topHighlight = room.highlights?.[0]
+
+  async function shareResults() {
+    const lines = ranked.map((p, i) => `${i + 1}. ${p.name} — ${p.score}`)
+    const text = s.shareChallengeText.replace('{lines}', lines.join('\n')).replace('{invite}', invite)
+    void trackMetric('share_results', room.code)
+    setShowShareNudge(false)
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: 'Sabotext', text, url: invite })
+        setShareFlash(s.resultsCopied)
+        setTimeout(() => setShareFlash(''), 2000)
+        return
+      }
+    } catch {
+      // fall through
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      setShareFlash(s.resultsCopied)
+      setTimeout(() => setShareFlash(''), 2000)
+    } catch {
+      onError(s.somethingWrong)
+    }
+  }
+
+  async function shareInviteMore() {
+    const text =
+      room.language === 'en'
+        ? `Join our Sabotext rematch: ${room.code}\n${invite}`
+        : `Gå med i vår Sabotext-omstart: ${room.code}\n${invite}`
+    void trackMetric('share_results', `invite:${room.code}`)
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: 'Sabotext', text, url: invite })
+        return
+      }
+    } catch {
+      // fall through
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      setShareFlash(s.copied)
+      setTimeout(() => setShareFlash(''), 2000)
+    } catch {
+      onError(s.somethingWrong)
+    }
+  }
+
+  async function shareImage() {
+    const blob = await renderResultsImage({
+      title: champ ? `${s.winnerIs} ${champ.name}` : s.standings,
+      subtitle: `${champ?.score ?? 0} ${s.points}`,
+      rows: ranked.map((p, i) => ({
+        rank: i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`,
+        name: p.name,
+        score: `${p.score}`,
+      })),
+      highlight: topHighlight ? `"${topHighlight.winnerText.slice(0, 60)}"` : undefined,
+      footer: invite,
+      cta: s.shareImageCta,
+    })
+    if (!blob) {
+      onError(s.somethingWrong)
+      return
+    }
+    void trackMetric('share_results', `image:${room.code}`)
+    setShowShareNudge(false)
+    const file = new File([blob], 'sabotext-resultat.png', { type: 'image/png' })
+    const text = s.imageShareText.replace('{invite}', invite)
+    try {
+      if (typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Sabotext', text })
+        return
+      }
+    } catch {
+      // fall through
+    }
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'sabotext-resultat.png'
+    a.click()
+    URL.revokeObjectURL(url)
+    setShareFlash(s.resultsCopied)
+    setTimeout(() => setShareFlash(''), 2000)
+  }
 
   return (
     <main className="winner-screen">
@@ -804,7 +1560,7 @@ function Winner({
           {tvMode ? s.tvModeOff : s.tvMode}
         </button>
       </div>
-      <h1>{s.winner}</h1>
+      <h1>{isYou ? s.youWon : s.winner}</h1>
       {champ && (
         <p className="champ">
           {champ.name}
@@ -813,23 +1569,91 @@ function Winner({
           </span>
         </p>
       )}
+
+      {showShareNudge && !tvMode && (
+        <p className="share-nudge">{s.shareViralHint}</p>
+      )}
+
+      {!tvMode && (
+        <div className="viral-share">
+          <button type="button" className="btn primary" onClick={() => void shareResults()}>
+            {shareFlash || s.challengeShare}
+          </button>
+          <button type="button" className="btn accent" onClick={() => void shareImage()}>
+            {s.shareImage}
+          </button>
+        </div>
+      )}
+
+      {room.highlights && room.highlights.length > 0 && (
+        <section className="highlights">
+          <h2>{s.highlights}</h2>
+          <ul>
+            {room.highlights.map((h) => (
+              <li key={`${h.round}-${h.authorName}`} className="highlight-card">
+                <span className="highlight-meta">
+                  {s.highlightRound.replace('{n}', String(h.round))} · {h.authorName} · {h.votes} {s.votes}
+                </span>
+                <p className="highlight-task">{h.promptTask}</p>
+                <div className="highlight-compare">
+                  <div>
+                    <em>{s.original}</em>
+                    <p>{h.originalText}</p>
+                  </div>
+                  <div>
+                    <em>{s.winningSabotage}</em>
+                    <p>{h.winnerText}</p>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <p className="section-title">{s.standings}</p>
       <ul className="player-list">
         {ranked.map((p, i) => (
           <li key={p.id}>
             <span>
               {i + 1}. {p.name}
+              {p.id === playerId ? ` (${s.you})` : ''}
             </span>
             <span className="score">{p.score}</span>
           </li>
         ))}
       </ul>
+
       {isHost ? (
-        <button type="button" className="btn primary" onClick={() => void rematchGame()}>
-          {s.rematch}
-        </button>
+        <>
+          <button type="button" className="btn primary" disabled={busy} onClick={async () => {
+            setBusy(true)
+            const res = await rematchGame()
+            setBusy(false)
+            if (res.error) onError(res.error)
+          }}>
+            {s.rematch}
+          </button>
+          {!tvMode && (
+            <button type="button" className="btn secondary" onClick={() => void shareInviteMore()}>
+              {s.inviteMoreRematch}
+            </button>
+          )}
+        </>
       ) : (
         <p className="muted">{s.waiting}</p>
       )}
+
+      {room.premiumTier !== 'party' && isHost && partyInfo.enabled && !tvMode && (
+        <PartyBuyPanel
+          s={s}
+          buyDayLabel={buyDayLabel}
+          buyWeekLabel={buyWeekLabel}
+          checkoutBusy={checkoutBusy}
+          onBuyParty={onBuyParty}
+        />
+      )}
+
       {!tvMode && <SisterLinks s={s} compact />}
       <button type="button" className="btn ghost dark hide-on-tv" onClick={onLeave}>
         {s.leave}

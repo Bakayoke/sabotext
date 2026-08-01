@@ -35,6 +35,23 @@ export type RoundResult = {
   gained: number
 }
 
+export type MatchHighlight = {
+  round: number
+  promptTask: string
+  originalText: string
+  winnerText: string
+  authorName: string
+  votes: number
+}
+
+export type PremiumTier = 'free' | 'party'
+
+export type PremiumLimits = {
+  /** 0 = unlimited */
+  maxPlayers: number
+  roundCounts: number[]
+}
+
 export type Room = {
   code: string
   hostId: string
@@ -57,6 +74,13 @@ export type Room = {
   votes: Record<string, string>
   endsAt: number
   lastRound: RoundResult[] | null
+  /** Top sabotages of the match (kept top 5 by votes) */
+  highlights: MatchHighlight[]
+  premiumExpiresAt: number | null
+  /** Listed on Find game / open lobbies */
+  isPublic: boolean
+  /** People who tried to join while room was full */
+  waitlist: { id: string; name: string; at: number }[]
   updatedAt: number
 }
 
@@ -97,4 +121,10 @@ export type PublicRoom = {
   endsAt: number
   lastRound: RoundResult[] | null
   phaseSeconds: number
+  premiumTier: PremiumTier
+  premiumExpiresAt: number | null
+  limits: PremiumLimits
+  isPublic: boolean
+  waitlist: { id: string; name: string; at: number }[]
+  highlights: MatchHighlight[]
 }

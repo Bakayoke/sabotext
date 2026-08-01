@@ -1,10 +1,12 @@
 import { mkdir, readFile, writeFile, access } from 'node:fs/promises'
 import path from 'node:path'
+import type { PartyPass } from './premium.js'
 import type { Room } from './types.js'
 
 export type PersistedSnapshot = {
   version: 1
   savedAt: number
+  passes: PartyPass[]
   rooms: Room[]
 }
 
@@ -22,7 +24,7 @@ let lastSaveAt = 0
 let lastError: string | null = null
 
 function emptySnapshot(): PersistedSnapshot {
-  return { version: 1, savedAt: Date.now(), rooms: [] }
+  return { version: 1, savedAt: Date.now(), passes: [], rooms: [] }
 }
 
 function fileBackend(dir: string): Backend {
@@ -109,48 +111,71 @@ export async function initPersist(): Promise<{ backend: string | null }> {
   return { backend: backend?.name ?? null }
 }
 
-export async function loadSnapshot(): Promise<PersistedSnapshot> {
-  if (!backend) return emptySnapshot()
+export async function loadSnapshot(): Promise<PersistedSnapshot | null> {
+  if (!backend) return null
   try {
     const snap = await backend.load()
-    return snap ?? emptySnapshot()
+    if (!snap || snap.version !== 1) return null
+    return snap
   } catch (err) {
     lastError = err instanceof Error ? err.message : 'load failed'
-    return emptySnapshot()
+    return null
   }
 }
 
-export function buildSnapshot(rooms: Room[]): PersistedSnapshot {
-  // Don't persist mid-round secrets unnecessarily — keep structure simple
-  const cleaned = rooms.map((r) => ({
-    ...r,
-    // Mark everyone disconnected on restore; they'll rejoin
-    players: r.players.map((p) => ({ ...p, connected: false })),
-  }))
-  return { version: 1, savedAt: Date.now(), rooms: cleaned }
+export function buildSnapshot(passes: Iterable<PartyPass>, rooms: Iterable<Room>): PersistedSnapshot {
+  const now = Date.now()
+  const keepMs = 12 * 60 * 60 * 1000
+  return {
+    version: 1,
+    savedAt: now,
+    passes: [...passes].filter((p) => p.expiresAt > now),
+    rooms: [...rooms]
+      .map((r) => ({
+        ...r,
+        players: r.players.map((p) => ({ ...p, connected: false })),
+      }))
+      .filter((room) => {
+        const partyLive = Boolean(room.premiumExpiresAt && room.premiumExpiresAt > now)
+        const fresh = now - (room.updatedAt || 0) < keepMs
+        return partyLive || fresh
+      }),
+  }
 }
 
 export function scheduleSave(snapshot: PersistedSnapshot) {
+  if (!backend || !ready) return
   pending = snapshot
   if (saveTimer) return
   saveTimer = setTimeout(() => {
     saveTimer = null
-    void flushPersist()
-  }, 800)
+    const toWrite = pending
+    pending = null
+    if (!toWrite || !backend) return
+    void backend
+      .save({ ...toWrite, savedAt: Date.now() })
+      .then(() => {
+        lastSaveAt = Date.now()
+        lastError = null
+      })
+      .catch((err) => {
+        lastError = err instanceof Error ? err.message : 'save failed'
+        console.error('Persist save failed', err)
+      })
+  }, 400)
 }
 
 export async function flushPersist() {
-  if (!backend || !pending) return
-  const snap = pending
-  pending = null
-  try {
-    await backend.save(snap)
-    lastSaveAt = Date.now()
-    lastError = null
-  } catch (err) {
-    lastError = err instanceof Error ? err.message : 'save failed'
-    console.error('Persist save failed', err)
+  if (!backend) return
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
   }
+  const toWrite = pending
+  pending = null
+  if (!toWrite) return
+  await backend.save({ ...toWrite, savedAt: Date.now() })
+  lastSaveAt = Date.now()
 }
 
 export function persistDiagnostics() {
@@ -160,5 +185,10 @@ export function persistDiagnostics() {
     ready,
     lastSaveAt: lastSaveAt || null,
     lastError,
+    hint: backend
+      ? null
+      : 'Sätt REDIS_URL (Railway Redis-plugin) eller SABOTEXT_DATA_DIR=/data med volume — annars försvinner Party/rum vid restart.',
   }
 }
+
+export { emptySnapshot }

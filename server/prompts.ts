@@ -155,6 +155,81 @@ export const PROMPTS: Prompt[] = [
     recipient: L('Polisen (hypotetiskt)', 'The police (hypothetically)'),
     task: L('Förklara varför du körde för fort', 'Explain why you were speeding'),
   },
+  {
+    id: 'dating-ghost',
+    recipient: L('Någon du ghostat', 'Someone you ghosted'),
+    task: L('Förklara varför du försvann i tre veckor', 'Explain why you disappeared for three weeks'),
+  },
+  {
+    id: 'dating-explain',
+    recipient: L('Din dejt', 'Your date'),
+    task: L('Förklara varför du luktar som en grill', 'Explain why you smell like a barbecue'),
+  },
+  {
+    id: 'work-sick',
+    recipient: L('Din chef', 'Your boss'),
+    task: L('Säg att du är sjuk men låter full', 'Say you’re sick but sound drunk'),
+  },
+  {
+    id: 'work-resign',
+    recipient: L('HR-chefen', 'The HR director'),
+    task: L('Säg upp dig via SMS', 'Quit your job over text'),
+  },
+  {
+    id: 'work-zoom',
+    recipient: L('Teamet på Zoom', 'The team on Zoom'),
+    task: L('Säg att du glömde stänga av mikrofonen', 'Say you forgot to mute your mic'),
+  },
+  {
+    id: 'family-dinner',
+    recipient: L('Hela familjen', 'The whole family'),
+    task: L('Säg att du inte kan komma på julmiddagen', 'Say you can’t make it to Christmas dinner'),
+  },
+  {
+    id: 'family-secret',
+    recipient: L('Mormor', 'Grandma'),
+    task: L('Berätta en hemlighet hon inte borde veta', 'Tell her a secret she shouldn’t know'),
+  },
+  {
+    id: 'family-pet',
+    recipient: L('Mamma', 'Mum'),
+    task: L('Berätta att du råkat mata hunden choklad', 'Tell her you accidentally fed the dog chocolate'),
+  },
+  {
+    id: 'absurd-alien',
+    recipient: L('Utomjordingar', 'Aliens'),
+    task: L('Förklara varför jorden är värt ett besök', 'Explain why Earth is worth visiting'),
+  },
+  {
+    id: 'absurd-time',
+    recipient: L('Dig själv från framtiden', 'Your future self'),
+    task: L('Varna dig själv om något du borde sluta med', 'Warn yourself to stop doing something'),
+  },
+  {
+    id: 'absurd-pizza',
+    recipient: L('Pizzerian', 'The pizzeria'),
+    task: L('Beställ en pizza med de konstigaste toppingsen', 'Order a pizza with the weirdest toppings'),
+  },
+  {
+    id: 'absurd-neighbor-cat',
+    recipient: L('Grannen', 'Your neighbor'),
+    task: L('Förklara varför deras katt bor hos dig nu', 'Explain why their cat lives with you now'),
+  },
+  {
+    id: 'dating-parents',
+    recipient: L('Din partners föräldrar', "Your partner's parents"),
+    task: L('Förklara varför du inte har ett riktigt jobb', 'Explain why you don’t have a real job'),
+  },
+  {
+    id: 'work-coffee',
+    recipient: L('Kontorets kaffemaskin-grupp', 'The office coffee chat'),
+    task: L('Erkänn att du aldrig diskat din mugg', 'Admit you never washed your mug'),
+  },
+  {
+    id: 'family-lie',
+    recipient: L('Pappa', 'Dad'),
+    task: L('Erkänn en vit lögn du hållit i åratal', 'Confess a white lie you’ve kept for years'),
+  },
 ]
 
 export function pickPrompts(count: number, lang: Lang, excludeIds: Set<string>): Prompt[] {
