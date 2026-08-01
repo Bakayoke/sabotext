@@ -8,12 +8,12 @@ export type PremiumLimits = {
 
 export const FREE_LIMITS: PremiumLimits = {
   maxPlayers: 5, // host + 4
-  roundCounts: [4, 6, 8, 10],
+  roundCounts: [8, 10, 12, 15],
 }
 
 export const PARTY_LIMITS: PremiumLimits = {
   maxPlayers: 0, // unlimited
-  roundCounts: [4, 6, 8, 10, 12, 16],
+  roundCounts: [10, 12, 15, 20, 25],
 }
 
 export const PARTY_PASS_MS = 24 * 60 * 60 * 1000

@@ -20,10 +20,10 @@ import type {
 
 const makeCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ', 4)
 
-export const WRITE_MS = 60_000
-export const SABOTAGE_MS = 90_000
-export const VOTE_MS = 35_000
-export const REVEAL_MS = 7_000
+export const WRITE_MS = 0
+export const SABOTAGE_MS = 0
+export const VOTE_MS = 0
+export const REVEAL_MS = 8_000
 
 const DISCONNECT_GRACE_MS = 60_000
 const HOST_TRANSFER_AFTER_MS = 90_000
@@ -62,7 +62,7 @@ function roomLimits(room: Room) {
 }
 
 function clampRounds(count: number, allowed: number[]) {
-  return allowed.includes(count) ? count : allowed[0] ?? 6
+  return allowed.includes(count) ? count : allowed[Math.min(1, allowed.length - 1)] ?? 10
 }
 
 export function getAllowedRounds(premiumExpiresAt: number | null = null) {
@@ -266,8 +266,8 @@ export function setRoundCount(code: string, playerId: string, count: number): Ro
     return {
       error:
         room.language === 'en'
-          ? 'Invalid round count (Party required for 12/16)'
-          : 'Ogiltigt antal rundor (Party krävs för 12/16)',
+          ? 'Invalid round count (Party required for 20/25)'
+          : 'Ogiltigt antal rundor (Party krävs för 20/25)',
     }
   }
   room.roundCount = count
@@ -538,15 +538,14 @@ function beginRound(room: Room) {
     return
   }
 
-  const orderIds = room.writerOrder.filter((id) =>
-    connectedPlaying.some((p) => p.id === id),
-  )
-  for (const p of connectedPlaying) {
-    if (!orderIds.includes(p.id)) orderIds.push(p.id)
+  const prevWriter = room.writerId
+  let orderIds = shuffle(connectedPlaying.map((p) => p.id))
+  if (orderIds.length > 1 && orderIds[0] === prevWriter) {
+    orderIds = [...orderIds.slice(1), orderIds[0]!]
   }
-  room.writerOrder = orderIds.length ? orderIds : connectedPlaying.map((p) => p.id)
-  room.writerIndex = (room.writerIndex + 1) % room.writerOrder.length
-  room.writerId = room.writerOrder[room.writerIndex] ?? connectedPlaying[0].id
+  room.writerOrder = orderIds
+  room.writerIndex = 0
+  room.writerId = room.writerOrder[0] ?? connectedPlaying[0]!.id
 
   const exclude = new Set(room.usedPromptIds)
   const [prompt] = pickPrompts(1, room.language, exclude)
@@ -558,7 +557,7 @@ function beginRound(room: Room) {
   room.votes = {}
   room.lastRound = null
   room.status = 'write'
-  room.endsAt = Date.now() + WRITE_MS
+  room.endsAt = 0
 }
 
 export function submitOriginal(
@@ -594,7 +593,7 @@ export function submitOriginal(
 
 function enterSabotage(room: Room) {
   room.status = 'sabotage'
-  room.endsAt = Date.now() + SABOTAGE_MS
+  room.endsAt = 0
 }
 
 function saboteurs(room: Room) {
@@ -669,7 +668,7 @@ function enterVote(room: Room) {
 
   room.votes = {}
   room.status = 'vote'
-  room.endsAt = Date.now() + VOTE_MS
+  room.endsAt = 0
 }
 
 export function castVote(
@@ -738,13 +737,18 @@ export function resolveVote(room: Room) {
     (a, b) => (tally.get(b.id) ?? 0) - (tally.get(a.id) ?? 0),
   )
 
+  const topVotes = ranked.length ? (tally.get(ranked[0]!.id) ?? 0) : 0
+  const tied =
+    topVotes > 0 &&
+    ranked.filter((s) => (tally.get(s.id) ?? 0) === topVotes).length > 1
+
   const results: RoundResult[] = []
-  ranked.forEach((s, i) => {
+  ranked.forEach((s) => {
     const author = room.players.find((p) => p.id === s.authorId)
     const votes = tally.get(s.id) ?? 0
+    // Clear winner gets 1000; exact tie → nobody scores
     let gained = 0
-    if (i === 0 && votes > 0) gained = 1000
-    else if (i === 1 && votes > 0 && ranked.length >= 3) gained = 400
+    if (!tied && votes === topVotes && votes > 0) gained = 1000
     if (author && gained) author.score += gained
     results.push({
       submissionId: s.id,
@@ -757,45 +761,13 @@ export function resolveVote(room: Room) {
   })
 
   room.lastRound = results
-  if (results[0]) pushHighlight(room, results[0])
+  if (!tied && results[0] && results[0].votes > 0) pushHighlight(room, results[0])
   room.status = 'reveal'
   room.endsAt = Date.now() + REVEAL_MS
 }
 
 export function onPhaseTimeout(room: Room) {
-  if (room.status === 'write') {
-    if (!room.originalText) {
-      const fallback =
-        room.language === 'en'
-          ? "Sorry I'm late, something came up…"
-          : 'Förlåt att jag är sen, det hände något…'
-      room.originalText = fallback
-      room.submissions = [
-        {
-          id: crypto.randomUUID(),
-          authorId: room.writerId ?? '',
-          text: fallback,
-          isOriginal: true,
-        },
-      ]
-    }
-    enterSabotage(room)
-    touch(room)
-    return
-  }
-
-  if (room.status === 'sabotage') {
-    enterVote(room)
-    touch(room)
-    return
-  }
-
-  if (room.status === 'vote') {
-    resolveVote(room)
-    touch(room)
-    return
-  }
-
+  // No timers on write / sabotage / vote — wait until everyone is done.
   if (room.status === 'reveal') {
     beginRound(room)
     touch(room)
@@ -888,9 +860,6 @@ export function pruneIdleRooms() {
 }
 
 export function phaseSeconds(status: RoomStatus): number {
-  if (status === 'write') return WRITE_MS / 1000
-  if (status === 'sabotage') return SABOTAGE_MS / 1000
-  if (status === 'vote') return VOTE_MS / 1000
   if (status === 'reveal') return REVEAL_MS / 1000
   return 0
 }

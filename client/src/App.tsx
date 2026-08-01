@@ -43,10 +43,10 @@ import { renderResultsImage } from './shareCard'
 import type { Lang, PartyPlan, PublicRoom } from './types'
 import { Confetti, useCountdown } from './ui'
 
-type Screen = 'home' | 'lobby' | 'play' | 'guest-unlock'
+type Screen = 'home' | 'join' | 'lobby' | 'play' | 'guest-unlock'
 
-const FREE_ROUND_OPTIONS = [4, 6, 8, 10]
-const PARTY_EXTRA_ROUNDS = [12, 16]
+const FREE_ROUND_OPTIONS = [8, 10, 12, 15]
+const PARTY_EXTRA_ROUNDS = [20, 25]
 const FACTOPIA_URL = 'https://factopia.net'
 const PARTY_PATHS_URL = 'https://partypaths.com'
 const PENDING_ROOM_KEY = 'sabotext-pending-room'
@@ -154,7 +154,8 @@ export default function App() {
   const [connected, setConnected] = useState(false)
   const [name, setName] = useState(() => loadPreferredName())
   const [joinCode, setJoinCode] = useState('')
-  const [rounds, setRounds] = useState(6)
+  const [joinStep, setJoinStep] = useState<'code' | 'name'>('code')
+  const [rounds, setRounds] = useState(10)
   const [lang, setLang] = useState<Lang>('sv')
   const [hostPlays, setHostPlaysLocal] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -244,8 +245,15 @@ export default function App() {
     })
 
     const params = new URLSearchParams(window.location.search)
-    const join = params.get('join')
-    if (join) setJoinCode(join.toUpperCase())
+    const join = params.get('join')?.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4)
+    if (join && join.length === 4) {
+      setJoinCode(join)
+      setJoinStep(loadPreferredName() ? 'name' : 'code')
+      setScreen('join')
+      const url = new URL(window.location.href)
+      url.searchParams.delete('join')
+      window.history.replaceState({}, '', url.pathname + url.search)
+    }
 
     void (async () => {
       const session = loadSession()
@@ -420,6 +428,12 @@ export default function App() {
   }
 
   async function handleJoin() {
+    if (joinStep === 'code') {
+      if (joinCode.length < 4) return
+      setError(null)
+      setJoinStep('name')
+      return
+    }
     setError(null)
     setBusy(true)
     savePreferredName(name)
@@ -442,11 +456,19 @@ export default function App() {
     setScreen(res.room.status === 'lobby' ? 'lobby' : 'play')
   }
 
+  function openJoin(code?: string) {
+    setError(null)
+    if (code) setJoinCode(code)
+    setJoinStep(code && code.length === 4 ? 'name' : 'code')
+    setScreen('join')
+  }
+
   function leave() {
     clearSession()
     setRoom(null)
     setPlayerId(null)
     setTvMode(false)
+    setJoinStep('code')
     setScreen('home')
   }
 
@@ -466,8 +488,6 @@ export default function App() {
             s={s}
             name={name}
             setName={setName}
-            joinCode={joinCode}
-            setJoinCode={setJoinCode}
             rounds={rounds}
             setRounds={setRounds}
             roundOptions={homeRoundOptions}
@@ -478,7 +498,7 @@ export default function App() {
             error={error}
             busy={busy}
             onCreate={handleCreate}
-            onJoin={handleJoin}
+            onOpenJoin={() => openJoin()}
             partyInfo={partyInfo}
             hasParty={hasParty}
             partyPass={partyPass}
@@ -497,6 +517,27 @@ export default function App() {
             ownerCode={ownerCode}
             setOwnerCode={setOwnerCode}
             onRedeemOwnerCode={onRedeemOwnerCode}
+            onOpenSavedGang={(code) => openJoin(code)}
+          />
+        )}
+
+        {screen === 'join' && (
+          <JoinScreen
+            s={s}
+            name={name}
+            setName={setName}
+            joinCode={joinCode}
+            setJoinCode={setJoinCode}
+            joinStep={joinStep}
+            setJoinStep={setJoinStep}
+            error={error}
+            busy={busy}
+            onJoin={() => void handleJoin()}
+            onBack={() => {
+              setError(null)
+              if (joinStep === 'name') setJoinStep('code')
+              else setScreen('home')
+            }}
           />
         )}
 
@@ -572,8 +613,6 @@ function Home({
   s,
   name,
   setName,
-  joinCode,
-  setJoinCode,
   rounds,
   setRounds,
   roundOptions,
@@ -584,7 +623,7 @@ function Home({
   error,
   busy,
   onCreate,
-  onJoin,
+  onOpenJoin,
   partyInfo,
   hasParty,
   partyPass,
@@ -601,12 +640,11 @@ function Home({
   ownerCode,
   setOwnerCode,
   onRedeemOwnerCode,
+  onOpenSavedGang,
 }: {
   s: ReturnType<typeof t>
   name: string
   setName: (v: string) => void
-  joinCode: string
-  setJoinCode: (v: string) => void
   rounds: number
   setRounds: (v: number) => void
   roundOptions: number[]
@@ -617,7 +655,7 @@ function Home({
   error: string | null
   busy: boolean
   onCreate: () => void
-  onJoin: () => void
+  onOpenJoin: () => void
   partyInfo: PartyInfo
   hasParty: boolean
   partyPass: { expiresAt: number } | null
@@ -634,12 +672,11 @@ function Home({
   ownerCode: string
   setOwnerCode: (v: string) => void
   onRedeemOwnerCode: (code: string) => void
+  onOpenSavedGang: (code: string) => void
 }) {
   const [homeData, setHomeData] = useState<HomePayload | null>(null)
-  const [joinStep, setJoinStep] = useState<'code' | 'name'>('code')
   const [tipFlash, setTipFlash] = useState('')
   const [savedGang] = useState(() => loadGang())
-  const hasSavedName = Boolean(name.trim())
 
   useEffect(() => {
     void fetchHome(lang).then(setHomeData)
@@ -662,13 +699,6 @@ function Home({
     } catch {
       // ignore
     }
-  }
-
-  function openSavedGang() {
-    if (!savedGang) return
-    setJoinCode(savedGang.code)
-    if (hasSavedName) setJoinStep('code')
-    else setJoinStep('name')
   }
 
   const examples = homeData?.examples?.slice(0, 2) ?? []
@@ -730,7 +760,7 @@ function Home({
             <strong>{s.sameGang}</strong>
             <span className="gang-code">{savedGang.code}</span>
           </div>
-          <button type="button" className="btn secondary sm" onClick={openSavedGang}>
+          <button type="button" className="btn secondary sm" onClick={() => onOpenSavedGang(savedGang.code)}>
             {s.openSavedGang}
           </button>
         </div>
@@ -790,72 +820,9 @@ function Home({
           <span>eller</span>
         </div>
 
-        <div className="join-steps">
-          {!hasSavedName && joinStep === 'name' && (
-            <p className="footer-note join-hint">{s.joinThenName}</p>
-          )}
-
-          {(hasSavedName || joinStep === 'code') && (
-            <label className="field">
-              <span>{s.code}</span>
-              <input
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4))}
-                maxLength={4}
-                placeholder="ABCD"
-                className="code-input"
-                autoCapitalize="characters"
-              />
-            </label>
-          )}
-
-          {!hasSavedName && joinStep === 'name' && (
-            <label className="field">
-              <span>{s.yourName}</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={20}
-                placeholder="Alex"
-                autoComplete="nickname"
-              />
-            </label>
-          )}
-
-          {hasSavedName ? (
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={busy || !name.trim() || joinCode.length < 4}
-              onClick={onJoin}
-            >
-              {s.join}
-            </button>
-          ) : joinStep === 'code' ? (
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={busy || joinCode.length < 4}
-              onClick={() => setJoinStep('name')}
-            >
-              {s.continueJoin}
-            </button>
-          ) : (
-            <>
-              <button type="button" className="btn-tiny" onClick={() => setJoinStep('code')}>
-                ← {s.code}
-              </button>
-              <button
-                type="button"
-                className="btn secondary"
-                disabled={busy || !name.trim() || joinCode.length < 4}
-                onClick={onJoin}
-              >
-                {s.join}
-              </button>
-            </>
-          )}
-        </div>
+        <button type="button" className="btn secondary" onClick={onOpenJoin}>
+          {s.joinWithCode}
+        </button>
 
         {error && <p className="error">{error}</p>}
       </div>
@@ -925,6 +892,89 @@ function Home({
       <p className="footer-note dns-hint">{s.dnsHint}</p>
 
       <SisterLinks s={s} />
+    </main>
+  )
+}
+
+function JoinScreen({
+  s,
+  name,
+  setName,
+  joinCode,
+  setJoinCode,
+  joinStep,
+  setJoinStep,
+  error,
+  busy,
+  onJoin,
+  onBack,
+}: {
+  s: ReturnType<typeof t>
+  name: string
+  setName: (v: string) => void
+  joinCode: string
+  setJoinCode: (v: string) => void
+  joinStep: 'code' | 'name'
+  setJoinStep: (v: 'code' | 'name') => void
+  error: string | null
+  busy: boolean
+  onJoin: () => void
+  onBack: () => void
+}) {
+  return (
+    <main className="home">
+      <header className="hero compact">
+        <p className="brand">Sabotext</p>
+        <h1>{s.joinWithCode}</h1>
+      </header>
+      <div className="panel">
+        {joinStep === 'code' ? (
+          <label className="field">
+            <span>{s.enterCode}</span>
+            <input
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4))}
+              maxLength={4}
+              placeholder="ABCD"
+              className="code-input"
+              autoCapitalize="characters"
+              autoFocus
+            />
+          </label>
+        ) : (
+          <>
+            <label className="field">
+              <span>{s.yourName}</span>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={20}
+                placeholder="Alex"
+                autoComplete="nickname"
+                autoFocus
+              />
+            </label>
+            <p className="footer-note">
+              {s.code}: <strong className="big-code inline">{joinCode}</strong>
+            </p>
+          </>
+        )}
+        {error && <p className="error">{error}</p>}
+        <button
+          type="button"
+          className="btn primary"
+          disabled={busy || (joinStep === 'code' ? joinCode.length < 4 : !name.trim())}
+          onClick={() => {
+            if (joinStep === 'code') setJoinStep('name')
+            else onJoin()
+          }}
+        >
+          {joinStep === 'code' ? s.continueJoin : s.join}
+        </button>
+        <button type="button" className="btn ghost" onClick={onBack}>
+          {s.back}
+        </button>
+      </div>
     </main>
   )
 }
@@ -1484,6 +1534,7 @@ function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<ty
 
 function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
   const [err, setErr] = useState<string | null>(null)
+  const waiting = (room.votedCount ?? 0) < (room.voterCount ?? 0)
 
   return (
     <section className="phase">
@@ -1518,7 +1569,7 @@ function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof
         })}
       </div>
       <p className="muted center">
-        {room.votedCount}/{room.voterCount}
+        {waiting ? s.waitingVotes : s.voted} · {room.votedCount}/{room.voterCount}
       </p>
       {err && <p className="error">{err}</p>}
     </section>
@@ -1526,7 +1577,11 @@ function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof
 }
 
 function RevealPhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
-  const winner = room.lastRound?.[0]
+  const results = room.lastRound ?? []
+  const winner = results[0]
+  const topVotes = winner?.votes ?? 0
+  const tied =
+    topVotes > 0 && results.filter((r) => r.votes === topVotes).length > 1
 
   useEffect(() => {
     navigator.vibrate?.([40, 30, 60])
@@ -1535,25 +1590,31 @@ function RevealPhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> })
   return (
     <section className="phase">
       <h2>{s.revealTitle}</h2>
-      {winner && winner.votes > 0 && (
-        <div className="reveal-compare">
-          <div className="bubble original">
-            <span>{s.original}</span>
-            <p>{room.originalText}</p>
+      {tied ? (
+        <p className="tie-banner">{s.tieRound}</p>
+      ) : (
+        winner &&
+        winner.votes > 0 &&
+        winner.gained > 0 && (
+          <div className="reveal-compare">
+            <div className="bubble original">
+              <span>{s.original}</span>
+              <p>{room.originalText}</p>
+            </div>
+            <div className="bubble winner-side">
+              <span>
+                {s.winningSabotage}: {winner.authorName}
+              </span>
+              <p>{winner.text}</p>
+              <em>
+                +{winner.gained} {s.points} · {winner.votes} {s.votes}
+              </em>
+            </div>
           </div>
-          <div className="bubble winner-side">
-            <span>
-              {s.winningSabotage}: {winner.authorName}
-            </span>
-            <p>{winner.text}</p>
-            <em>
-              +{winner.gained} {s.points} · {winner.votes} {s.votes}
-            </em>
-          </div>
-        </div>
+        )
       )}
       <ul className="results">
-        {(room.lastRound ?? []).map((r) => (
+        {results.map((r) => (
           <li key={r.submissionId}>
             <div>
               <strong>{r.authorName}</strong>

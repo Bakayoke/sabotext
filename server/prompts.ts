@@ -235,13 +235,14 @@ export const PROMPTS: Prompt[] = [
 export function pickPrompts(count: number, lang: Lang, excludeIds: Set<string>): Prompt[] {
   void lang
   const theme = todaysTheme()
-  const themed = PROMPTS.filter((p) => theme.ids.includes(p.id) && !excludeIds.has(p.id))
-  const available = PROMPTS.filter((p) => !excludeIds.has(p.id))
-  const preferred = [...themed, ...available.filter((p) => !themed.includes(p))]
-  const pool = preferred.length >= count ? preferred : [...PROMPTS]
-  const shuffledThemed = shuffle([...themed])
-  const rest = shuffle(pool.filter((p) => !shuffledThemed.includes(p)))
-  return [...shuffledThemed, ...rest].slice(0, count)
+  const themed = shuffle(PROMPTS.filter((p) => theme.ids.includes(p.id) && !excludeIds.has(p.id)))
+  const rest = shuffle(PROMPTS.filter((p) => !excludeIds.has(p.id) && !theme.ids.includes(p.id)))
+  // Mix strongly: start with a shuffle of everything available, then lightly bias theme into the front third
+  const all = shuffle([...themed, ...rest])
+  if (all.length === 0) return shuffle([...PROMPTS]).slice(0, count)
+  // Re-shuffle after injecting up to 2 themed prompts at random positions for variety
+  const picks = all.slice(0, Math.max(count * 2, count))
+  return shuffle(picks).slice(0, count)
 }
 
 export function localize(text: Localized, lang: Lang): string {
