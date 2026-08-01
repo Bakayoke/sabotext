@@ -5,6 +5,22 @@ const SESSION_KEY = 'sabotext-session'
 const PARTY_PASS_KEY = 'sabotext-party-pass'
 const HAS_PAID_KEY = 'sabotext-has-paid'
 export const NAME_KEY = 'sabotext-name'
+export const GANG_KEY = 'sabotext-gang'
+
+const GANG_TTL_MS = 36 * 60 * 60 * 1000
+
+export type GangSave = { code: string; at: number }
+
+export type HomePayload = {
+  theme: { id: string; label: string; blurb: string }
+  examples: { task: string; original: string; sabotage: string }[]
+  activity: {
+    gamesTonight: number
+    liveRooms: number
+    livePlayers: number
+    openLobbies: number
+  }
+}
 
 export type Session = { code: string; playerId: string; name: string }
 
@@ -36,6 +52,40 @@ export function loadPreferredName(): string {
 export function savePreferredName(name: string) {
   try {
     localStorage.setItem(NAME_KEY, name.trim().slice(0, 20))
+  } catch {
+    // ignore
+  }
+}
+
+export function loadGang(): GangSave | null {
+  try {
+    const raw = localStorage.getItem(GANG_KEY)
+    if (!raw) return null
+    const gang = JSON.parse(raw) as GangSave
+    if (!gang?.code || !gang?.at || Date.now() - gang.at > GANG_TTL_MS) {
+      localStorage.removeItem(GANG_KEY)
+      return null
+    }
+    return gang
+  } catch {
+    return null
+  }
+}
+
+export function saveGang(code: string) {
+  try {
+    localStorage.setItem(
+      GANG_KEY,
+      JSON.stringify({ code: code.toUpperCase().slice(0, 4), at: Date.now() } satisfies GangSave),
+    )
+  } catch {
+    // ignore
+  }
+}
+
+export function clearGang() {
+  try {
+    localStorage.removeItem(GANG_KEY)
   } catch {
     // ignore
   }
@@ -314,6 +364,21 @@ export type PartyInfo = {
   firstPartyPercentOff?: number
   firstPartyDayLabel?: string
   firstPartyWeekLabel?: string
+}
+
+export async function fetchHome(lang: Lang): Promise<HomePayload> {
+  const fallback: HomePayload = {
+    theme: { id: 'default', label: 'Sabotext', blurb: '' },
+    examples: [],
+    activity: { gamesTonight: 0, liveRooms: 0, livePlayers: 0, openLobbies: 0 },
+  }
+  try {
+    const res = await fetch(`${apiBase()}/api/home?lang=${lang}`)
+    if (!res.ok) return fallback
+    return (await res.json()) as HomePayload
+  } catch {
+    return fallback
+  }
 }
 
 export async function fetchPartyInfo(): Promise<PartyInfo> {

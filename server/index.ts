@@ -44,6 +44,7 @@ import {
 } from './stripe.js'
 import { buildSnapshot, flushPersist, initPersist, loadSnapshot, persistDiagnostics, scheduleSave } from './persist.js'
 import { funnelSnapshot, publicActivity, trackFunnel, type FunnelEvent } from './metrics.js'
+import { exampleHighlights, localize, todaysTheme } from './prompts.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT) || 3001
@@ -110,6 +111,21 @@ app.get('/api/lobbies', (req, res) => {
     lobbies,
     onlineRooms: lobbies.length,
     weekThemePack: theme,
+    activity: publicActivity(live),
+  })
+})
+
+app.get('/api/home', (req, res) => {
+  const lang = req.query.lang === 'en' ? 'en' : 'sv'
+  const theme = todaysTheme()
+  const live = liveActivity()
+  res.json({
+    theme: {
+      id: theme.id,
+      label: localize(theme.label, lang),
+      blurb: localize(theme.blurb, lang),
+    },
+    examples: exampleHighlights(lang),
     activity: publicActivity(live),
   })
 })

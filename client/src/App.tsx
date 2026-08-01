@@ -8,16 +8,19 @@ import {
   clearSession,
   createGame,
   ensureSessionBound,
+  fetchHome,
   fetchPartyInfo,
   fetchStripeHint,
   hasPaidBefore,
   joinGame,
+  loadGang,
   loadPartyPass,
   loadPreferredName,
   loadSession,
   markPaidBefore,
   rematchGame,
   redeemParty,
+  saveGang,
   savePartyPass,
   savePreferredName,
   saveSession,
@@ -31,6 +34,7 @@ import {
   submitSabotage,
   trackMetric,
   isWeekend,
+  type HomePayload,
   type PartyInfo,
 } from './api'
 import { t } from './i18n'
@@ -631,6 +635,45 @@ function Home({
   setOwnerCode: (v: string) => void
   onRedeemOwnerCode: (code: string) => void
 }) {
+  const [homeData, setHomeData] = useState<HomePayload | null>(null)
+  const [joinStep, setJoinStep] = useState<'code' | 'name'>('code')
+  const [tipFlash, setTipFlash] = useState('')
+  const [savedGang] = useState(() => loadGang())
+  const hasSavedName = Boolean(name.trim())
+
+  useEffect(() => {
+    void fetchHome(lang).then(setHomeData)
+  }, [lang])
+
+  async function tipFriend() {
+    const text = s.tipFriendText
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: 'Sabotext', text, url: 'https://sabotext.com' })
+        return
+      }
+    } catch {
+      // fall through
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      setTipFlash(s.copied)
+      setTimeout(() => setTipFlash(''), 2000)
+    } catch {
+      // ignore
+    }
+  }
+
+  function openSavedGang() {
+    if (!savedGang) return
+    setJoinCode(savedGang.code)
+    if (hasSavedName) setJoinStep('code')
+    else setJoinStep('name')
+  }
+
+  const examples = homeData?.examples?.slice(0, 2) ?? []
+  const gamesTonight = homeData?.activity?.gamesTonight ?? 0
+
   return (
     <main className="home">
       <header className="hero">
@@ -639,11 +682,59 @@ function Home({
         <p className="lede">{s.subtitle}</p>
       </header>
 
+      {gamesTonight > 0 && (
+        <p className="activity-line">{s.activityLine.replace('{n}', String(gamesTonight))}</p>
+      )}
+
+      {homeData?.theme?.label && (
+        <div className="theme-chip">
+          <span className="theme-chip-label">{s.todaysTheme}</span>
+          <strong>{homeData.theme.label}</strong>
+          {homeData.theme.blurb && <p>{homeData.theme.blurb}</p>}
+        </div>
+      )}
+
+      {examples.length > 0 && (
+        <div className="examples-stack">
+          {examples.map((ex, i) => (
+            <article key={i} className="example-card">
+              <span className="example-label">{s.exampleLabel}</span>
+              <p className="example-task">{ex.task}</p>
+              <div className="example-flow">
+                <div>
+                  <em>{s.exampleOriginal}</em>
+                  <p>{ex.original}</p>
+                </div>
+                <span className="example-arrow" aria-hidden>
+                  →
+                </span>
+                <div>
+                  <em>{s.exampleSabotage}</em>
+                  <p>{ex.sabotage}</p>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
       <ol className="how-to">
         <li>{s.howTo1}</li>
         <li>{s.howTo2}</li>
         <li>{s.howTo3}</li>
       </ol>
+
+      {savedGang && (
+        <div className="gang-banner">
+          <div>
+            <strong>{s.sameGang}</strong>
+            <span className="gang-code">{savedGang.code}</span>
+          </div>
+          <button type="button" className="btn secondary sm" onClick={openSavedGang}>
+            {s.openSavedGang}
+          </button>
+        </div>
+      )}
 
       <div className="panel">
         <label className="field">
@@ -699,29 +790,79 @@ function Home({
           <span>eller</span>
         </div>
 
-        <label className="field">
-          <span>{s.code}</span>
-          <input
-            value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4))}
-            maxLength={4}
-            placeholder="ABCD"
-            className="code-input"
-            autoCapitalize="characters"
-          />
-        </label>
+        <div className="join-steps">
+          {!hasSavedName && joinStep === 'name' && (
+            <p className="footer-note join-hint">{s.joinThenName}</p>
+          )}
 
-        <button
-          type="button"
-          className="btn secondary"
-          disabled={busy || !name.trim() || joinCode.length < 4}
-          onClick={onJoin}
-        >
-          {s.join}
-        </button>
+          {(hasSavedName || joinStep === 'code') && (
+            <label className="field">
+              <span>{s.code}</span>
+              <input
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4))}
+                maxLength={4}
+                placeholder="ABCD"
+                className="code-input"
+                autoCapitalize="characters"
+              />
+            </label>
+          )}
+
+          {!hasSavedName && joinStep === 'name' && (
+            <label className="field">
+              <span>{s.yourName}</span>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={20}
+                placeholder="Alex"
+                autoComplete="nickname"
+              />
+            </label>
+          )}
+
+          {hasSavedName ? (
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy || !name.trim() || joinCode.length < 4}
+              onClick={onJoin}
+            >
+              {s.join}
+            </button>
+          ) : joinStep === 'code' ? (
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy || joinCode.length < 4}
+              onClick={() => setJoinStep('name')}
+            >
+              {s.continueJoin}
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn-tiny" onClick={() => setJoinStep('code')}>
+                ← {s.code}
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={busy || !name.trim() || joinCode.length < 4}
+                onClick={onJoin}
+              >
+                {s.join}
+              </button>
+            </>
+          )}
+        </div>
 
         {error && <p className="error">{error}</p>}
       </div>
+
+      <button type="button" className="btn tip-friend" onClick={() => void tipFriend()}>
+        {tipFlash || s.tipFriend}
+      </button>
 
       {partyInfo.enabled && (
         <div className="panel party-home">
@@ -780,6 +921,8 @@ function Home({
           {partyFlash && <p className="party-flash">{partyFlash}</p>}
         </div>
       )}
+
+      <p className="footer-note dns-hint">{s.dnsHint}</p>
 
       <SisterLinks s={s} />
     </main>
@@ -1461,9 +1604,19 @@ function Winner({
   const isYou = champ?.id === playerId
   const [busy, setBusy] = useState(false)
   const [shareFlash, setShareFlash] = useState('')
+  const [tiktokFlash, setTiktokFlash] = useState('')
+  const [gangFlash, setGangFlash] = useState('')
   const [showShareNudge, setShowShareNudge] = useState(true)
   const invite = joinUrl(room.code)
   const topHighlight = room.highlights?.[0]
+  const meme = topHighlight
+    ? {
+        task: topHighlight.promptTask,
+        original: topHighlight.originalText,
+        sabotage: topHighlight.winnerText,
+        author: topHighlight.authorName,
+      }
+    : undefined
 
   async function shareResults() {
     const lines = ranked.map((p, i) => `${i + 1}. ${p.name} — ${p.score}`)
@@ -1522,6 +1675,7 @@ function Winner({
         score: `${p.score}`,
       })),
       highlight: topHighlight ? `"${topHighlight.winnerText.slice(0, 60)}"` : undefined,
+      meme,
       footer: invite,
       cta: s.shareImageCta,
     })
@@ -1549,6 +1703,47 @@ function Winner({
     URL.revokeObjectURL(url)
     setShareFlash(s.resultsCopied)
     setTimeout(() => setShareFlash(''), 2000)
+  }
+
+  async function copyTikTokScript() {
+    if (!topHighlight) return
+    const text = s.tiktokScript
+      .replace('{task}', topHighlight.promptTask)
+      .replace('{original}', topHighlight.originalText)
+      .replace('{sabotage}', topHighlight.winnerText)
+    try {
+      await navigator.clipboard.writeText(text)
+      setTiktokFlash(s.tiktokCopied)
+      setTimeout(() => setTiktokFlash(''), 2000)
+    } catch {
+      onError(s.somethingWrong)
+    }
+  }
+
+  async function saveGangAndShare() {
+    saveGang(room.code)
+    const text =
+      room.language === 'en'
+        ? `${s.sameGangTomorrow}\nJoin our Sabotext crew again: ${room.code}\n${invite}`
+        : `${s.sameGangTomorrow}\nSamma gäng imorgon — gå med: ${room.code}\n${invite}`
+    void trackMetric('share_results', `gang:${room.code}`)
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: 'Sabotext', text, url: invite })
+        setGangFlash(s.saveGang)
+        setTimeout(() => setGangFlash(''), 2000)
+        return
+      }
+    } catch {
+      // fall through
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      setGangFlash(s.saveGang)
+      setTimeout(() => setGangFlash(''), 2000)
+    } catch {
+      onError(s.somethingWrong)
+    }
   }
 
   return (
@@ -1580,14 +1775,22 @@ function Winner({
             {shareFlash || s.challengeShare}
           </button>
           <button type="button" className="btn accent" onClick={() => void shareImage()}>
-            {s.shareImage}
+            {meme ? s.shareMeme : s.shareImage}
           </button>
+          {topHighlight && (
+            <button type="button" className="btn tiktok-btn" onClick={() => void copyTikTokScript()}>
+              {tiktokFlash || s.copyForTikTok}
+            </button>
+          )}
         </div>
       )}
 
       {room.highlights && room.highlights.length > 0 && (
         <section className="highlights">
           <h2>{s.highlights}</h2>
+          {topHighlight && !tvMode && (
+            <p className="highlight-share-hint">{s.highlightShare}</p>
+          )}
           <ul>
             {room.highlights.map((h) => (
               <li key={`${h.round}-${h.authorName}`} className="highlight-card">
@@ -1637,6 +1840,11 @@ function Winner({
           {!tvMode && (
             <button type="button" className="btn secondary" onClick={() => void shareInviteMore()}>
               {s.inviteMoreRematch}
+            </button>
+          )}
+          {!tvMode && (
+            <button type="button" className="btn secondary" onClick={() => void saveGangAndShare()}>
+              {gangFlash || s.sameGangTomorrow}
             </button>
           )}
         </>

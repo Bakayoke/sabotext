@@ -234,12 +234,110 @@ export const PROMPTS: Prompt[] = [
 
 export function pickPrompts(count: number, lang: Lang, excludeIds: Set<string>): Prompt[] {
   void lang
+  const theme = todaysTheme()
+  const themed = PROMPTS.filter((p) => theme.ids.includes(p.id) && !excludeIds.has(p.id))
   const available = PROMPTS.filter((p) => !excludeIds.has(p.id))
-  const pool = available.length >= count ? available : [...PROMPTS]
-  const shuffled = [...pool].sort(() => Math.random() - 0.5)
-  return shuffled.slice(0, count)
+  const preferred = [...themed, ...available.filter((p) => !themed.includes(p))]
+  const pool = preferred.length >= count ? preferred : [...PROMPTS]
+  const shuffledThemed = shuffle([...themed])
+  const rest = shuffle(pool.filter((p) => !shuffledThemed.includes(p)))
+  return [...shuffledThemed, ...rest].slice(0, count)
 }
 
 export function localize(text: Localized, lang: Lang): string {
   return lang === 'en' ? text.en : text.sv
+}
+
+export type DayTheme = {
+  id: string
+  label: Localized
+  blurb: Localized
+  ids: string[]
+}
+
+const DAY_THEMES: DayTheme[] = [
+  {
+    id: 'work',
+    label: L('Jobb-kaos', 'Work chaos'),
+    blurb: L('Chefer, kollegor och HR får sig en omgång.', 'Bosses, coworkers, and HR take the hit.'),
+    ids: ['boss-late', 'coworker', 'hr', 'client', 'landlord', 'bank'],
+  },
+  {
+    id: 'dating',
+    label: L('Dating-drama', 'Dating drama'),
+    blurb: L('Crush, ex och dåliga ursäkter.', 'Crush, ex, and terrible excuses.'),
+    ids: ['crush', 'ex-hello', 'date-cancel', 'partner-sorry', 'bestie-secret', 'stranger'],
+  },
+  {
+    id: 'family',
+    label: L('Familjefesten', 'Family night'),
+    blurb: L('Mamma, pappa och syskon — pinsamt garanterat.', 'Mum, dad, siblings — awkward guaranteed.'),
+    ids: ['mum-money', 'dad-car', 'sibling', 'roommate', 'wedding', 'neighbor'],
+  },
+  {
+    id: 'absurd',
+    label: L('Absurt', 'Absurd'),
+    blurb: L('Uber, flyg, polisen och fel nummer.', 'Uber, flights, police, and wrong numbers.'),
+    ids: ['uber', 'flight', 'police', 'influencer', 'hairdresser', 'delivery', 'dentist'],
+  },
+  {
+    id: 'party',
+    label: L('Kalasläge', 'Party mode'),
+    blurb: L('Kompisar, kalas och gruppchattar.', 'Friends, parties, and group chats.'),
+    ids: ['party-skip', 'groupchat', 'friend-borrow', 'gym', 'bestie-secret', 'wedding'],
+  },
+]
+
+function stockholmDayIndex() {
+  const key = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Stockholm',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+  let hash = 0
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0
+  return hash
+}
+
+export function todaysTheme(): DayTheme {
+  return DAY_THEMES[stockholmDayIndex() % DAY_THEMES.length]!
+}
+
+export function exampleHighlights(lang: Lang): { task: string; original: string; sabotage: string }[] {
+  if (lang === 'en') {
+    return [
+      {
+        task: 'Explain why you’re late for work',
+        original: 'Sorry, traffic was crazy this morning.',
+        sabotage: 'Sorry, I woke up in a stranger’s kitchen and had to Uber barefoot.',
+      },
+      {
+        task: 'Say you can’t come to the party',
+        original: 'Can’t make it tonight, need an early night.',
+        sabotage: 'Can’t make it — I’m emotionally in a situationship with my couch.',
+      },
+    ]
+  }
+  return [
+    {
+      task: 'Svara chefen varför du är sen',
+      original: 'Förlåt, det var köer på vägen.',
+      sabotage: 'Förlåt, jag vaknade i nåns kök och fick Uber:a barfota.',
+    },
+    {
+      task: 'Säg att du inte kan komma på kalaset',
+      original: 'Kan tyvärr inte ikväll, behöver sova.',
+      sabotage: 'Kan inte — jag är i en situationship med soffan just nu.',
+    },
+  ]
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j]!, a[i]!]
+  }
+  return a
 }
