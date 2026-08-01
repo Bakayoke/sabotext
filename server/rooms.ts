@@ -538,14 +538,9 @@ function beginRound(room: Room) {
     return
   }
 
-  const prevWriter = room.writerId
-  let orderIds = shuffle(connectedPlaying.map((p) => p.id))
-  if (orderIds.length > 1 && orderIds[0] === prevWriter) {
-    orderIds = [...orderIds.slice(1), orderIds[0]!]
-  }
-  room.writerOrder = orderIds
+  room.writerOrder = shuffle(connectedPlaying.map((p) => p.id))
   room.writerIndex = 0
-  room.writerId = room.writerOrder[0] ?? connectedPlaying[0]!.id
+  room.writerId = null
 
   const exclude = new Set(room.usedPromptIds)
   const [prompt] = pickPrompts(1, room.language, exclude)
@@ -560,6 +555,11 @@ function beginRound(room: Room) {
   room.endsAt = 0
 }
 
+function writers(room: Room) {
+  return playingPlayers(room).filter((p) => p.connected)
+}
+
+/** Everyone writes their own message for the prompt; no timers. */
 export function submitOriginal(
   code: string,
   playerId: string,
@@ -567,48 +567,14 @@ export function submitOriginal(
 ): Room | { error: string } {
   const room = rooms.get(code)
   if (!room) return { error: 'Rummet finns inte' }
-  if (room.status !== 'write') return { error: 'Inte skrivfas just nu' }
-  if (room.writerId !== playerId) return { error: 'Bara skribenten kan skicka' }
-
-  const cleaned = text.trim().slice(0, 280)
-  if (cleaned.length < 2) {
-    return {
-      error: room.language === 'en' ? 'Write a bit more' : 'Skriv lite mer',
-    }
+  // Legacy rooms mid-sabotage: treat as write
+  if (room.status !== 'write' && room.status !== 'sabotage') {
+    return { error: 'Inte skrivfas just nu' }
   }
-
-  room.originalText = cleaned
-  room.submissions = [
-    {
-      id: crypto.randomUUID(),
-      authorId: playerId,
-      text: cleaned,
-      isOriginal: true,
-    },
-  ]
-  enterSabotage(room)
-  touch(room)
-  return room
-}
-
-function enterSabotage(room: Room) {
-  room.status = 'sabotage'
-  room.endsAt = 0
-}
-
-function saboteurs(room: Room) {
-  return playingPlayers(room).filter((p) => p.connected && p.id !== room.writerId)
-}
-
-export function submitSabotage(
-  code: string,
-  playerId: string,
-  text: string,
-): Room | { error: string } {
-  const room = rooms.get(code)
-  if (!room) return { error: 'Rummet finns inte' }
-  if (room.status !== 'sabotage') return { error: 'Inte sabotagefas just nu' }
-  if (playerId === room.writerId) return { error: 'Skribenten saboterar inte' }
+  if (room.status === 'sabotage') {
+    room.status = 'write'
+    room.endsAt = 0
+  }
 
   const player = room.players.find((p) => p.id === playerId)
   if (!player?.playing) return { error: 'Du spelar inte' }
@@ -620,9 +586,10 @@ export function submitSabotage(
     }
   }
 
-  const existing = room.submissions.find((s) => s.authorId === playerId && !s.isOriginal)
+  const existing = room.submissions.find((s) => s.authorId === playerId)
   if (existing) {
     existing.text = cleaned
+    existing.isOriginal = false
   } else {
     room.submissions.push({
       id: crypto.randomUUID(),
@@ -632,35 +599,29 @@ export function submitSabotage(
     })
   }
 
-  const needed = saboteurs(room)
-  const done = needed.every((p) =>
-    room.submissions.some((s) => s.authorId === p.id && !s.isOriginal),
-  )
-  if (done && needed.length > 0) {
-    enterVote(room)
-  }
+  const needed = writers(room)
+  const done =
+    needed.length > 0 &&
+    needed.every((p) => room.submissions.some((s) => s.authorId === p.id))
+  if (done) enterVote(room)
 
   touch(room)
   return room
 }
 
+/** @deprecated Alias — everyone writes via submitOriginal now */
+export function submitSabotage(
+  code: string,
+  playerId: string,
+  text: string,
+): Room | { error: string } {
+  return submitOriginal(code, playerId, text)
+}
+
 function enterVote(room: Room) {
-  const sabotages = room.submissions.filter((s) => !s.isOriginal)
-  if (sabotages.length === 0) {
-    const writer = room.players.find((p) => p.id === room.writerId)
-    if (writer) writer.score += 500
-    room.lastRound = writer
-      ? [
-          {
-            submissionId: room.submissions[0]?.id ?? '',
-            authorId: writer.id,
-            authorName: writer.name,
-            text: room.originalText,
-            votes: 0,
-            gained: 500,
-          },
-        ]
-      : []
+  const entries = room.submissions.filter((s) => !s.isOriginal)
+  if (entries.length === 0) {
+    room.lastRound = []
     room.status = 'reveal'
     room.endsAt = Date.now() + REVEAL_MS
     return
@@ -713,7 +674,7 @@ function pushHighlight(room: Room, winner: RoundResult) {
   const highlight: MatchHighlight = {
     round: room.currentRound,
     promptTask,
-    originalText: room.originalText,
+    originalText: promptTask,
     winnerText: winner.text,
     authorName: winner.authorName,
     votes: winner.votes,
@@ -726,14 +687,14 @@ function pushHighlight(room: Room, winner: RoundResult) {
 export function resolveVote(room: Room) {
   if (room.status !== 'vote') return
 
-  const sabotages = room.submissions.filter((s) => !s.isOriginal)
+  const entries = room.submissions.filter((s) => !s.isOriginal)
   const tally = new Map<string, number>()
-  for (const s of sabotages) tally.set(s.id, 0)
+  for (const s of entries) tally.set(s.id, 0)
   for (const subId of Object.values(room.votes)) {
     tally.set(subId, (tally.get(subId) ?? 0) + 1)
   }
 
-  const ranked = [...sabotages].sort(
+  const ranked = [...entries].sort(
     (a, b) => (tally.get(b.id) ?? 0) - (tally.get(a.id) ?? 0),
   )
 
@@ -746,7 +707,6 @@ export function resolveVote(room: Room) {
   ranked.forEach((s) => {
     const author = room.players.find((p) => p.id === s.authorId)
     const votes = tally.get(s.id) ?? 0
-    // Clear winner gets 1000; exact tie → nobody scores
     let gained = 0
     if (!tied && votes === topVotes && votes > 0) gained = 1000
     if (author && gained) author.score += gained
@@ -860,6 +820,7 @@ export function pruneIdleRooms() {
 }
 
 export function phaseSeconds(status: RoomStatus): number {
+  // Never expose countdown pressure for write/vote — only soft reveal advance
   if (status === 'reveal') return REVEAL_MS / 1000
   return 0
 }
@@ -867,50 +828,50 @@ export function phaseSeconds(status: RoomStatus): number {
 export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
   const lang = room.language
   const viewer = room.players.find((p) => p.id === viewerId)
-  const youAreWriter = room.writerId === viewerId
   const youAreSpectator = !viewer?.playing
-  const writer = room.players.find((p) => p.id === room.writerId)
   const tier = tierFromExpiry(room.premiumExpiresAt)
   const limits = limitsFor(tier)
 
   const yourSabotage =
     room.submissions.find((s) => s.authorId === viewerId && !s.isOriginal)?.text ?? null
 
-  const needed = saboteurs(room).length
-  const sabotageDone = room.submissions.filter((s) => !s.isOriginal).length
+  const neededPlayers = writers(room)
+  const writeDone = neededPlayers.filter((p) =>
+    room.submissions.some((s) => s.authorId === p.id && !s.isOriginal),
+  ).length
 
   let submissions: PublicRoom['submissions'] = []
 
   if (room.status === 'vote') {
-    const sabotages = shuffle(room.submissions.filter((s) => !s.isOriginal))
-    submissions = sabotages.map((s) => ({
+    const entries = shuffle(room.submissions.filter((s) => !s.isOriginal))
+    submissions = entries.map((s) => ({
       id: s.id,
       text: s.text,
       isYours: s.authorId === viewerId,
       isOriginal: false,
     }))
   } else if (room.status === 'reveal' || room.status === 'finished') {
-    submissions = room.submissions.map((s) => {
-      const author = room.players.find((p) => p.id === s.authorId)
-      const votes = Object.values(room.votes).filter((v) => v === s.id).length
-      return {
-        id: s.id,
-        text: s.text,
-        authorName: author?.name,
-        votes: s.isOriginal ? undefined : votes,
-        isYours: s.authorId === viewerId,
-        isOriginal: s.isOriginal,
-      }
-    })
+    submissions = room.submissions
+      .filter((s) => !s.isOriginal)
+      .map((s) => {
+        const author = room.players.find((p) => p.id === s.authorId)
+        const votes = Object.values(room.votes).filter((v) => v === s.id).length
+        return {
+          id: s.id,
+          text: s.text,
+          authorName: author?.name,
+          votes,
+          isYours: s.authorId === viewerId,
+          isOriginal: false,
+        }
+      })
   }
 
-  const showOriginal =
-    room.status === 'sabotage' ||
-    room.status === 'vote' ||
-    room.status === 'reveal' ||
-    (room.status === 'write' && youAreWriter && room.originalText)
-
   const showHighlights = room.status === 'finished' || room.status === 'reveal'
+
+  // Never surface phase timers to clients for write/vote (and clear stale endsAt)
+  const endsAt =
+    room.status === 'reveal' && room.endsAt > 0 ? room.endsAt : 0
 
   return {
     code: room.code,
@@ -919,12 +880,12 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
     language: lang,
     roundCount: room.roundCount,
     hostPlays: room.hostPlays,
-    status: room.status,
+    status: room.status === 'sabotage' ? 'write' : room.status,
     currentRound: room.currentRound,
     totalRounds: room.roundCount,
-    writerId: room.writerId,
-    writerName: writer?.name ?? null,
-    youAreWriter,
+    writerId: null,
+    writerName: null,
+    youAreWriter: false,
     youAreSpectator,
     prompt: room.prompt
       ? {
@@ -932,17 +893,17 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
           task: localize(room.prompt.task, lang),
         }
       : null,
-    originalText: showOriginal ? room.originalText || null : null,
+    originalText: null,
     yourSabotage,
-    sabotageCount: sabotageDone,
-    sabotageNeeded: needed,
+    sabotageCount: writeDone,
+    sabotageNeeded: neededPlayers.length,
     submissions,
     yourVote: room.votes[viewerId] ?? null,
     votedCount: Object.keys(room.votes).length,
     voterCount: voteEligible(room).length,
-    endsAt: room.endsAt,
+    endsAt,
     lastRound: room.lastRound,
-    phaseSeconds: phaseSeconds(room.status),
+    phaseSeconds: phaseSeconds(room.status === 'sabotage' ? 'write' : room.status),
     premiumTier: tier,
     premiumExpiresAt: room.premiumExpiresAt,
     limits,

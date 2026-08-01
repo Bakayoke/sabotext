@@ -768,6 +768,112 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.standings {
+  width: 100%;
+  margin-top: 0.85rem;
+}
+
+.standings.compact {
+  margin-top: 1rem;
+  opacity: 0.95;
+}
+
+.standings-title {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ecfdf5;
+  text-align: center;
+}
+
+.standings.compact .standings-title {
+  font-size: 0.85rem;
+  color: rgba(236, 253, 245, 0.85);
+}
+
+.standings-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(255, 251, 245, 0.1);
+  border-radius: 0.85rem;
+  overflow: hidden;
+  font-size: 0.92rem;
+}
+
+.standings.compact .standings-table {
+  font-size: 0.85rem;
+}
+
+.standings-table th,
+.standings-table td {
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(236, 253, 245, 0.12);
+  color: #ecfdf5;
+}
+
+.standings-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(236, 253, 245, 0.65);
+  font-weight: 700;
+}
+
+.standings-table th:first-child,
+.standings-table td:first-child {
+  width: 2.2rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: rgba(236, 253, 245, 0.7);
+}
+
+.standings-table th:last-child,
+.standings-table td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.standings-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.standings-table tr.you td {
+  background: rgba(245, 158, 11, 0.22);
+  color: #fff8eb;
+  font-weight: 700;
+}
+
+.phase .standings {
+  margin-top: 1rem;
+}
+
+.phase .standings-title {
+  color: var(--brand-deep);
+}
+
+.phase .standings-table {
+  background: color-mix(in srgb, var(--surface) 92%, #0f766e);
+  border: 1px solid color-mix(in srgb, #0f766e 22%, transparent);
+}
+
+.phase .standings-table th,
+.phase .standings-table td {
+  color: var(--text);
+  border-bottom-color: color-mix(in srgb, #0f766e 14%, transparent);
+}
+
+.phase .standings-table th {
+  color: var(--muted);
+}
+
+.phase .standings-table tr.you td {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--brand-deep);
+}
+
 .sister-stack {
   display: flex;
   flex-direction: column;

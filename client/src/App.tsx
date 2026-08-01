@@ -31,7 +31,6 @@ import {
   startGame,
   startPartyCheckout,
   submitOriginal,
-  submitSabotage,
   trackMetric,
   isWeekend,
   type HomePayload,
@@ -41,7 +40,7 @@ import { t } from './i18n'
 import { JoinQr } from './qr'
 import { renderResultsImage } from './shareCard'
 import type { Lang, PartyPlan, PublicRoom } from './types'
-import { Confetti, useCountdown } from './ui'
+import { Confetti } from './ui'
 
 type Screen = 'home' | 'join' | 'lobby' | 'play' | 'guest-unlock'
 
@@ -1344,8 +1343,6 @@ function Play({
   onBuyParty: (plan?: PartyPlan) => void
 }) {
   const isHost = room.hostId === playerId
-  const totalMs = (room.phaseSeconds || 30) * 1000
-  const { seconds, ratio } = useCountdown(room.endsAt || null, totalMs)
 
   if (room.status === 'finished') {
     return (
@@ -1374,12 +1371,6 @@ function Play({
         <span className="meta">
           {s.round} {room.currentRound}/{room.totalRounds}
         </span>
-        {room.endsAt > 0 && (
-          <div className="timer" style={{ ['--ratio' as string]: String(ratio) }}>
-            <i />
-            <span>{seconds}s</span>
-          </div>
-        )}
         <button type="button" className="btn ghost dark sm" onClick={() => setTvMode((v) => !v)}>
           {tvMode ? s.tvModeOff : s.tvMode}
         </button>
@@ -1388,11 +1379,10 @@ function Play({
       {room.youAreSpectator && !tvMode && <p className="banner soft">{s.spectator}</p>}
 
       {room.status === 'write' && <WritePhase room={room} s={s} tvMode={tvMode} />}
-      {room.status === 'sabotage' && <SabotagePhase room={room} s={s} tvMode={tvMode} />}
       {room.status === 'vote' && <VotePhase room={room} s={s} tvMode={tvMode} />}
-      {room.status === 'reveal' && <RevealPhase room={room} s={s} />}
+      {room.status === 'reveal' && <RevealPhase room={room} s={s} playerId={playerId} />}
 
-      <ScoreStrip room={room} playerId={playerId} />
+      {room.status !== 'reveal' && <StandingsTable room={room} playerId={playerId} s={s} compact />}
     </main>
   )
 }
@@ -1410,19 +1400,37 @@ function PromptCard({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) 
 }
 
 function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(room.yourSabotage ?? '')
   const [err, setErr] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const done = Boolean(room.yourSabotage)
 
-  if (!room.youAreWriter || tvMode) {
+  useEffect(() => {
+    if (room.yourSabotage) setText(room.yourSabotage)
+  }, [room.yourSabotage])
+
+  if (room.youAreSpectator || tvMode) {
     return (
       <section className="phase wait">
         <PromptCard room={room} s={s} />
         <div className="pulse-dot" />
-        <h2>
-          {room.writerName} {s.theyWrite}
-        </h2>
-        <p className="muted">{s.waitingWriter}</p>
+        <h2>{s.waitingWriter}</h2>
+        <p className="muted">
+          {room.sabotageCount}/{room.sabotageNeeded}
+        </p>
+      </section>
+    )
+  }
+
+  if (done) {
+    return (
+      <section className="phase wait">
+        <PromptCard room={room} s={s} />
+        <p className="ok">{s.submitted}</p>
+        <h2>{s.waitingWriter}</h2>
+        <p className="muted">
+          {room.sabotageCount}/{room.sabotageNeeded}
+        </p>
       </section>
     )
   }
@@ -1430,6 +1438,7 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
   return (
     <section className="phase">
       <h2>{s.youWrite}</h2>
+      <p className="muted">{s.writeHint}</p>
       <PromptCard room={room} s={s} />
       <div className="sms">
         <textarea
@@ -1460,78 +1469,6 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
   )
 }
 
-function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
-  const [text, setText] = useState(room.yourSabotage ?? room.originalText ?? '')
-  const [err, setErr] = useState<string | null>(null)
-  const [sending, setSending] = useState(false)
-  const done = Boolean(room.yourSabotage)
-
-  useEffect(() => {
-    if (room.yourSabotage) setText(room.yourSabotage)
-    else if (room.originalText && !text) setText(room.originalText)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room.originalText, room.yourSabotage])
-
-  if (room.youAreWriter || room.youAreSpectator || tvMode) {
-    return (
-      <section className="phase wait">
-        <PromptCard room={room} s={s} />
-        <div className="bubble original">
-          <span>{s.original}</span>
-          <p>{room.originalText}</p>
-        </div>
-        <h2>{s.waitingSabotage}</h2>
-        <p className="muted">
-          {room.sabotageCount}/{room.sabotageNeeded}
-        </p>
-      </section>
-    )
-  }
-
-  return (
-    <section className="phase">
-      <h2>{s.sabotageTitle}</h2>
-      <p className="muted">{s.sabotageHint}</p>
-      <PromptCard room={room} s={s} />
-      <div className="bubble original">
-        <span>{s.original}</span>
-        <p>{room.originalText}</p>
-      </div>
-      <div className="sms">
-        <label className="sms-label">{s.yourVersion}</label>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value.slice(0, 280))}
-          placeholder={s.sabotagePlaceholder}
-          rows={4}
-          maxLength={280}
-          disabled={done}
-        />
-        <div className="sms-meta">{text.length}/280</div>
-      </div>
-      {!done ? (
-        <button
-          type="button"
-          className="btn primary"
-          disabled={sending || text.trim().length < 2}
-          onClick={async () => {
-            setErr(null)
-            setSending(true)
-            const res = await submitSabotage(text)
-            setSending(false)
-            if (res.error) setErr(res.error)
-          }}
-        >
-          {s.submitSabotage}
-        </button>
-      ) : (
-        <p className="ok">{s.submitted}</p>
-      )}
-      {err && <p className="error">{err}</p>}
-    </section>
-  )
-}
-
 function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
   const [err, setErr] = useState<string | null>(null)
   const waiting = (room.votedCount ?? 0) < (room.voterCount ?? 0)
@@ -1540,10 +1477,7 @@ function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof
     <section className="phase">
       <h2>{s.voteTitle}</h2>
       {!tvMode && <p className="muted">{s.voteHint}</p>}
-      <div className="bubble original compact">
-        <span>{s.original}</span>
-        <p>{room.originalText}</p>
-      </div>
+      <PromptCard room={room} s={s} />
       <div className="vote-grid">
         {room.submissions.map((sub) => {
           const selected = room.yourVote === sub.id
@@ -1576,12 +1510,19 @@ function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof
   )
 }
 
-function RevealPhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
+function RevealPhase({
+  room,
+  s,
+  playerId,
+}: {
+  room: PublicRoom
+  s: ReturnType<typeof t>
+  playerId: string
+}) {
   const results = room.lastRound ?? []
   const winner = results[0]
   const topVotes = winner?.votes ?? 0
-  const tied =
-    topVotes > 0 && results.filter((r) => r.votes === topVotes).length > 1
+  const tied = topVotes > 0 && results.filter((r) => r.votes === topVotes).length > 1
 
   useEffect(() => {
     navigator.vibrate?.([40, 30, 60])
@@ -1590,26 +1531,21 @@ function RevealPhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> })
   return (
     <section className="phase">
       <h2>{s.revealTitle}</h2>
+      <PromptCard room={room} s={s} />
       {tied ? (
         <p className="tie-banner">{s.tieRound}</p>
       ) : (
         winner &&
         winner.votes > 0 &&
         winner.gained > 0 && (
-          <div className="reveal-compare">
-            <div className="bubble original">
-              <span>{s.original}</span>
-              <p>{room.originalText}</p>
-            </div>
-            <div className="bubble winner-side">
-              <span>
-                {s.winningSabotage}: {winner.authorName}
-              </span>
-              <p>{winner.text}</p>
-              <em>
-                +{winner.gained} {s.points} · {winner.votes} {s.votes}
-              </em>
-            </div>
+          <div className="bubble winner-side">
+            <span>
+              {s.winningSabotage}: {winner.authorName}
+            </span>
+            <p>{winner.text}</p>
+            <em>
+              +{winner.gained} {s.points} · {winner.votes} {s.votes}
+            </em>
           </div>
         )
       )}
@@ -1626,6 +1562,7 @@ function RevealPhase({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> })
           </li>
         ))}
       </ul>
+      <StandingsTable room={room} playerId={playerId} s={s} />
       <p className="muted center">{s.nextRound}</p>
     </section>
   )
@@ -1861,8 +1798,8 @@ function Winner({
                 <p className="highlight-task">{h.promptTask}</p>
                 <div className="highlight-compare">
                   <div>
-                    <em>{s.original}</em>
-                    <p>{h.originalText}</p>
+                    <em>{s.task}</em>
+                    <p>{h.promptTask}</p>
                   </div>
                   <div>
                     <em>{s.winningSabotage}</em>
@@ -1875,18 +1812,7 @@ function Winner({
         </section>
       )}
 
-      <p className="section-title">{s.standings}</p>
-      <ul className="player-list">
-        {ranked.map((p, i) => (
-          <li key={p.id}>
-            <span>
-              {i + 1}. {p.name}
-              {p.id === playerId ? ` (${s.you})` : ''}
-            </span>
-            <span className="score">{p.score}</span>
-          </li>
-        ))}
-      </ul>
+      <StandingsTable room={room} playerId={playerId} s={s} />
 
       {isHost ? (
         <>
@@ -1931,18 +1857,45 @@ function Winner({
   )
 }
 
-function ScoreStrip({ room, playerId }: { room: PublicRoom; playerId: string }) {
-  const top = [...room.players]
+function StandingsTable({
+  room,
+  playerId,
+  s,
+  compact,
+}: {
+  room: PublicRoom
+  playerId: string
+  s: ReturnType<typeof t>
+  compact?: boolean
+}) {
+  const ranked = [...room.players]
     .filter((p) => p.playing)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 4)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+
   return (
-    <aside className="score-strip" aria-label="scores">
-      {top.map((p) => (
-        <span key={p.id} className={p.id === playerId ? 'you' : undefined}>
-          {p.name} <b>{p.score}</b>
-        </span>
-      ))}
-    </aside>
+    <div className={`standings${compact ? ' compact' : ''}`}>
+      <p className="standings-title">{s.scoreboard}</p>
+      <table className="standings-table">
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">{s.players}</th>
+            <th scope="col">{s.points}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ranked.map((p, i) => (
+            <tr key={p.id} className={p.id === playerId ? 'you' : undefined}>
+              <td>{i + 1}</td>
+              <td>
+                {p.name}
+                {p.id === playerId ? ` (${s.you})` : ''}
+              </td>
+              <td>{p.score}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
