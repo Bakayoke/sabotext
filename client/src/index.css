@@ -930,6 +930,27 @@ button {
   font-weight: 700 !important;
 }
 
+.qr-scan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-bottom: 0.5rem;
+}
+
+.qr-scan-video {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 1rem;
+  background: #0b1f1c;
+  border: 1px solid color-mix(in srgb, #0f766e 30%, transparent);
+}
+
+.muted.center,
+.footer-note.center {
+  text-align: center;
+}
+
 .sister-stack.compact {
   gap: 0.45rem;
 }

@@ -40,6 +40,7 @@ import {
 } from './api'
 import { t } from './i18n'
 import { JoinQr } from './qr'
+import { QrJoinScanner } from './qrScan'
 import { renderResultsImage } from './shareCard'
 import type { Lang, PartyPlan, PublicRoom } from './types'
 import { Confetti } from './ui'
@@ -155,7 +156,7 @@ export default function App() {
   const [connected, setConnected] = useState(false)
   const [name, setName] = useState(() => loadPreferredName())
   const [joinCode, setJoinCode] = useState('')
-  const [joinStep, setJoinStep] = useState<'code' | 'name'>('code')
+  const [joinStep, setJoinStep] = useState<'choose' | 'code' | 'name' | 'scan'>('choose')
   const [rounds, setRounds] = useState(10)
   const [lang, setLang] = useState<Lang>('sv')
   const [lobbies, setLobbies] = useState<PublicLobbyCard[]>([])
@@ -475,7 +476,7 @@ export default function App() {
       setJoinStep('name')
     } else {
       setJoinCode('')
-      setJoinStep('code')
+      setJoinStep('choose')
     }
     setScreen('join')
   }
@@ -490,7 +491,7 @@ export default function App() {
     setRoom(null)
     setPlayerId(null)
     setTvMode(false)
-    setJoinStep('code')
+    setJoinStep('choose')
     setScreen('home')
   }
 
@@ -560,6 +561,7 @@ export default function App() {
             onBack={() => {
               setError(null)
               if (joinStep === 'name') setJoinStep('code')
+              else if (joinStep === 'code' || joinStep === 'scan') setJoinStep('choose')
               else setScreen('home')
             }}
           />
@@ -861,7 +863,7 @@ function Home({
         </div>
 
         <button type="button" className="btn secondary" onClick={onOpenJoin}>
-          {s.joinWithCode}
+          {s.join}
         </button>
 
         <button type="button" className="btn accent" onClick={onOpenFind}>
@@ -959,21 +961,61 @@ function JoinScreen({
   setName: (v: string) => void
   joinCode: string
   setJoinCode: (v: string) => void
-  joinStep: 'code' | 'name'
-  setJoinStep: (v: 'code' | 'name') => void
+  joinStep: 'choose' | 'code' | 'name' | 'scan'
+  setJoinStep: (v: 'choose' | 'code' | 'name' | 'scan') => void
   error: string | null
   busy: boolean
   onJoin: () => void
   onBack: () => void
 }) {
+  const title =
+    joinStep === 'choose'
+      ? s.join
+      : joinStep === 'scan'
+        ? s.scanQr
+        : joinStep === 'code'
+          ? s.enterCode
+          : s.enterName
+
   return (
     <main className="home">
       <header className="hero compact">
         <p className="brand">Sabotext</p>
-        <h1>{joinStep === 'code' ? s.joinWithCode : s.enterName}</h1>
+        <h1>{title}</h1>
       </header>
       <div className="panel">
-        {joinStep === 'code' ? (
+        {joinStep === 'choose' && (
+          <>
+            <p className="muted center">{s.joinChooseHint}</p>
+            <button type="button" className="btn primary" onClick={() => setJoinStep('code')}>
+              {s.enterCode}
+            </button>
+            <button type="button" className="btn secondary" onClick={() => setJoinStep('scan')}>
+              {s.scanQr}
+            </button>
+          </>
+        )}
+
+        {joinStep === 'scan' && (
+          <>
+            <QrJoinScanner
+              scanningLabel={s.scanningQr}
+              unsupportedHint={s.qrUnsupported}
+              onError={() => {
+                /* scanner shows unsupportedHint inline */
+              }}
+              onCode={(code) => {
+                setJoinCode(code)
+                setJoinStep('name')
+              }}
+            />
+            <button type="button" className="btn secondary" onClick={() => setJoinStep('code')}>
+              {s.enterCodeInstead}
+            </button>
+          </>
+        )}
+
+        {joinStep === 'code' && (
           <label className="field">
             <span>{s.enterCode}</span>
             <input
@@ -986,7 +1028,9 @@ function JoinScreen({
               autoFocus
             />
           </label>
-        ) : (
+        )}
+
+        {joinStep === 'name' && (
           <>
             <label className="field">
               <span>{s.yourName}</span>
@@ -1004,18 +1048,31 @@ function JoinScreen({
             </p>
           </>
         )}
+
         {error && <p className="error">{error}</p>}
-        <button
-          type="button"
-          className="btn primary"
-          disabled={busy || (joinStep === 'code' ? joinCode.length < 4 : !name.trim())}
-          onClick={() => {
-            if (joinStep === 'code') setJoinStep('name')
-            else onJoin()
-          }}
-        >
-          {joinStep === 'code' ? s.continueCode : s.join}
-        </button>
+
+        {joinStep === 'code' && (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || joinCode.length < 4}
+            onClick={() => setJoinStep('name')}
+          >
+            {s.continueCode}
+          </button>
+        )}
+
+        {joinStep === 'name' && (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || !name.trim() || joinCode.length < 4}
+            onClick={onJoin}
+          >
+            {s.join}
+          </button>
+        )}
+
         <button type="button" className="btn ghost" onClick={onBack}>
           {s.back}
         </button>
