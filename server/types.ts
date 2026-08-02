@@ -77,6 +77,8 @@ export type Room = {
   submissions: Submission[]
   /** saboteur playerId → original author playerId */
   sabotageTargets: Record<string, string>
+  /** Stable display order of sabotage submission ids during vote */
+  voteOrder: string[]
   /** playerId → submissionId */
   votes: Record<string, string>
   endsAt: number

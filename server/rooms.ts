@@ -123,6 +123,7 @@ export function createRoom(
     originalText: '',
     submissions: [],
     sabotageTargets: {},
+    voteOrder: [],
     votes: {},
     endsAt: 0,
     lastRound: null,
@@ -239,6 +240,7 @@ export function hydrateRooms(list: Room[]) {
       isPublic: Boolean(raw.isPublic),
       waitlist: Array.isArray(raw.waitlist) ? raw.waitlist : [],
       sabotageTargets: raw.sabotageTargets ?? {},
+      voteOrder: Array.isArray(raw.voteOrder) ? raw.voteOrder : [],
       premiumExpiresAt: raw.premiumExpiresAt ?? null,
       players: (raw.players ?? []).map((p) => ({ ...p, connected: false })),
       status:
@@ -535,6 +537,7 @@ function beginRound(room: Room) {
     room.originalText = ''
     room.submissions = []
     room.sabotageTargets = {}
+    room.voteOrder = []
     room.votes = {}
     trackFunnel('game_finished', room.code)
     return
@@ -560,6 +563,7 @@ function beginRound(room: Room) {
   room.originalText = ''
   room.submissions = []
   room.sabotageTargets = {}
+  room.voteOrder = []
   room.votes = {}
   room.lastRound = null
   room.status = 'write'
@@ -696,12 +700,14 @@ function enterVote(room: Room) {
   const entries = room.submissions.filter((s) => !s.isOriginal)
   if (entries.length === 0) {
     room.lastRound = []
+    room.voteOrder = []
     room.status = 'reveal'
     room.endsAt = Date.now() + REVEAL_MS
     return
   }
 
   room.votes = {}
+  room.voteOrder = shuffle(entries.map((s) => s.id))
   room.status = 'vote'
   room.endsAt = 0
 }
@@ -753,6 +759,8 @@ function pushHighlight(room: Room, winner: RoundResult) {
     .slice(0, 5)
 }
 
+const POINTS_PER_VOTE = 100
+
 export function resolveVote(room: Room) {
   if (room.status !== 'vote') return
 
@@ -768,9 +776,6 @@ export function resolveVote(room: Room) {
   )
 
   const topVotes = ranked.length ? (tally.get(ranked[0]!.id) ?? 0) : 0
-  const tied =
-    topVotes > 0 &&
-    ranked.filter((s) => (tally.get(s.id) ?? 0) === topVotes).length > 1
 
   const results: RoundResult[] = []
   ranked.forEach((s) => {
@@ -782,8 +787,7 @@ export function resolveVote(room: Room) {
       ? room.submissions.find((o) => o.authorId === s.targetAuthorId && o.isOriginal)
       : undefined
     const votes = tally.get(s.id) ?? 0
-    let gained = 0
-    if (!tied && votes === topVotes && votes > 0) gained = 1000
+    const gained = votes * POINTS_PER_VOTE
     if (author && gained) author.score += gained
     results.push({
       submissionId: s.id,
@@ -798,7 +802,9 @@ export function resolveVote(room: Room) {
   })
 
   room.lastRound = results
-  if (!tied && results[0] && results[0].votes > 0) pushHighlight(room, results[0])
+  for (const r of results) {
+    if (r.votes > 0 && r.votes === topVotes) pushHighlight(room, r)
+  }
   room.status = 'reveal'
   room.endsAt = Date.now() + REVEAL_MS
 }
@@ -933,13 +939,25 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
   let submissions: PublicRoom['submissions'] = []
 
   if (room.status === 'vote') {
-    const entries = shuffle(room.submissions.filter((s) => !s.isOriginal))
-    submissions = entries.map((s) => ({
-      id: s.id,
-      text: s.text,
-      isYours: s.authorId === viewerId,
-      isOriginal: false,
-    }))
+    const entries = room.submissions.filter((s) => !s.isOriginal)
+    const byId = new Map(entries.map((s) => [s.id, s]))
+    const order =
+      room.voteOrder.length > 0
+        ? [...room.voteOrder.filter((id) => byId.has(id))]
+        : entries.map((s) => s.id)
+    // Append any missing ids (shouldn't happen mid-vote)
+    for (const s of entries) {
+      if (!order.includes(s.id)) order.push(s.id)
+    }
+    submissions = order.map((id) => {
+      const s = byId.get(id)!
+      return {
+        id: s.id,
+        text: s.text,
+        isYours: s.authorId === viewerId,
+        isOriginal: false,
+      }
+    })
   } else if (room.status === 'reveal' || room.status === 'finished') {
     submissions = room.submissions
       .filter((s) => !s.isOriginal)

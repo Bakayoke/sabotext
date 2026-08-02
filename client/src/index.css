@@ -321,19 +321,44 @@ button {
   background: linear-gradient(135deg, var(--accent), var(--accent-deep));
   color: #1a1205;
   box-shadow: 0 10px 24px rgba(245, 158, 11, 0.3);
+  border: 1px solid color-mix(in srgb, var(--accent-deep) 50%, transparent);
+}
+
+.winner-screen .btn.secondary,
+.winner-screen .btn.accent {
+  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent-deep) 35%, transparent);
+}
+
+.winner-screen .viral-share .btn {
+  min-height: 2.75rem;
 }
 
 .btn.ghost {
   background: transparent;
   color: #ecfdf5;
-  border: 1px solid rgba(236, 253, 245, 0.25);
+  border: 1px solid rgba(236, 253, 245, 0.35);
 }
 
+.home .btn.ghost,
+.panel .btn.ghost,
 .lobby .btn.ghost,
 .play .btn.ghost,
-.winner-screen .btn.ghost {
-  color: var(--muted);
-  border-color: #c5d5d1;
+.winner-screen .btn.ghost,
+.btn.ghost.dark {
+  color: var(--brand-deep);
+  border: 1.5px solid color-mix(in srgb, var(--brand) 40%, #9eb5b0);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.home .btn.ghost:not(:disabled):hover,
+.panel .btn.ghost:not(:disabled):hover,
+.lobby .btn.ghost:not(:disabled):hover,
+.play .btn.ghost:not(:disabled):hover,
+.winner-screen .btn.ghost:not(:disabled):hover,
+.btn.ghost.dark:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: var(--brand);
 }
 
 .divider {
@@ -756,6 +781,11 @@ button {
   white-space: nowrap;
 }
 
+.results li.top {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+}
+
 .score-strip {
   display: flex;
   flex-wrap: wrap;
@@ -1035,8 +1065,9 @@ button {
 }
 
 .btn.ghost.dark {
-  color: var(--muted);
-  border-color: #c5d5d1;
+  color: var(--brand-deep);
+  border-color: color-mix(in srgb, var(--brand) 40%, #9eb5b0);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .btn.sm {
@@ -1099,6 +1130,13 @@ button {
   color: #ecfdf5;
 }
 
+.qr-overlay .btn.ghost,
+.qr-overlay .btn.ghost.dark {
+  color: #ecfdf5;
+  border-color: rgba(236, 253, 245, 0.4);
+  background: transparent;
+}
+
 .qr-overlay .big-code {
   font-family: var(--font-display);
   font-size: 2.6rem;
@@ -1108,11 +1146,6 @@ button {
 
 .qr-overlay .muted {
   color: rgba(236, 253, 245, 0.75);
-}
-
-.qr-overlay .btn.ghost.dark {
-  color: #ecfdf5;
-  border-color: rgba(236, 253, 245, 0.3);
 }
 
 /* —— TV / fullscreen —— */

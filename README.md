@@ -9,8 +9,8 @@ Sällskapsspel där alla skriver ett SMS — sen saboterar ni varandras till nå
 1. Ni får samma uppdrag (t.ex. *svara chefen varför du är sen*)
 2. Alla skriver sitt eget SMS
 3. Varje spelare saboterar en annans text
-4. Alla röstar på det roligaste sabotaget (även sitt eget) — vinnaren får poäng
-5. Oavgjort ger 0 poäng
+4. Alla röstar på det roligaste sabotaget (även sitt eget) — **100 poäng per röst**
+5. Vid lika totalpoäng delar ni segern
 
 ## Party
 

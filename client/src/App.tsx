@@ -1945,9 +1945,9 @@ function RevealPhase({
   playerId: string
 }) {
   const results = room.lastRound ?? []
-  const winner = results[0]
-  const topVotes = winner?.votes ?? 0
-  const tied = topVotes > 0 && results.filter((r) => r.votes === topVotes).length > 1
+  const topVotes = results[0]?.votes ?? 0
+  const tops = results.filter((r) => r.votes > 0 && r.votes === topVotes)
+  const tiedTop = tops.length > 1
 
   useEffect(() => {
     navigator.vibrate?.([40, 30, 60])
@@ -1957,26 +1957,21 @@ function RevealPhase({
     <section className="phase">
       <h2>{s.revealTitle}</h2>
       <PromptCard room={room} s={s} />
-      {tied ? (
-        <p className="tie-banner">{s.tieRound}</p>
-      ) : (
-        winner &&
-        winner.votes > 0 &&
-        winner.gained > 0 && (
-          <div className="bubble winner-side">
-            <span>
-              {s.winningSabotage}: {winner.authorName}
-            </span>
-            <p>{winner.text}</p>
-            <em>
-              +{winner.gained} {s.points} · {winner.votes} {s.votes}
-            </em>
-          </div>
-        )
-      )}
+      {tiedTop && <p className="tie-banner">{s.tieRound}</p>}
+      {tops.map((winner) => (
+        <div key={winner.submissionId} className="bubble winner-side">
+          <span>
+            {s.winningSabotage}: {winner.authorName}
+          </span>
+          <p>{winner.text}</p>
+          <em>
+            +{winner.gained} {s.points} · {winner.votes} {s.votes}
+          </em>
+        </div>
+      ))}
       <ul className="results">
         {results.map((r) => (
-          <li key={r.submissionId}>
+          <li key={r.submissionId} className={tops.some((t) => t.submissionId === r.submissionId) ? 'top' : undefined}>
             <div>
               <strong>{r.authorName}</strong>
               {r.targetName && (
@@ -2035,9 +2030,19 @@ function Winner({
   dayWas?: string
   weekWas?: string
 }) {
-  const ranked = [...room.players].filter((p) => p.playing).sort((a, b) => b.score - a.score)
-  const champ = ranked[0]
-  const isYou = champ?.id === playerId
+  const ranked = [...room.players].filter((p) => p.playing).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+  const topScore = ranked[0]?.score ?? 0
+  const champs = ranked.filter((p) => p.score === topScore)
+  const isYou = champs.some((p) => p.id === playerId)
+  const champTitle =
+    champs.length > 1
+      ? isYou
+        ? s.youTied
+        : s.winners
+      : isYou
+        ? s.youWon
+        : s.winner
+  const champNames = champs.map((c) => c.name).join(' & ')
   const [busy, setBusy] = useState(false)
   const [shareFlash, setShareFlash] = useState('')
   const [tiktokFlash, setTiktokFlash] = useState('')
@@ -2108,10 +2113,12 @@ function Winner({
 
   async function shareImage() {
     const blob = await renderResultsImage({
-      title: champ ? `${s.winnerIs} ${champ.name}` : s.standings,
-      subtitle: `${champ?.score ?? 0} ${s.points}`,
+      title: champs.length
+        ? `${champs.length > 1 ? s.winnersAre : s.winnerIs} ${champNames}`
+        : s.standings,
+      subtitle: `${topScore} ${s.points}`,
       rows: ranked.map((p, i) => ({
-        rank: i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`,
+        rank: p.score === topScore ? '🥇' : `${i + 1}.`,
         name: p.name,
         score: `${p.score}`,
       })),
@@ -2196,15 +2203,17 @@ function Winner({
           {tvMode ? s.tvModeOff : s.tvMode}
         </button>
       </div>
-      <h1>{isYou ? s.youWon : s.winner}</h1>
-      {champ && (
+      <h1>{champTitle}</h1>
+      {champs.length > 0 && (
         <p className="champ">
-          {champ.name}
+          {champNames}
           <span>
-            {champ.score} {s.points}
+            {topScore} {s.points}
           </span>
         </p>
       )}
+
+      <StandingsTable room={room} playerId={playerId} s={s} />
 
       {showShareNudge && !tvMode && (
         <p className="share-nudge">{s.shareViralHint}</p>
@@ -2254,8 +2263,6 @@ function Winner({
           </ul>
         </section>
       )}
-
-      <StandingsTable room={room} playerId={playerId} s={s} />
 
       {isHost ? (
         <>
@@ -2329,6 +2336,9 @@ function StandingsTable({
     .filter((p) => p.playing)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
 
+  let displayRank = 0
+  let prevScore: number | null = null
+
   return (
     <div className={`standings${compact ? ' compact' : ''}`}>
       <p className="standings-title">{s.scoreboard}</p>
@@ -2341,16 +2351,23 @@ function StandingsTable({
           </tr>
         </thead>
         <tbody>
-          {ranked.map((p, i) => (
-            <tr key={p.id} className={p.id === playerId ? 'you' : undefined}>
-              <td>{i + 1}</td>
-              <td>
-                {p.name}
-                {p.id === playerId ? ` (${s.you})` : ''}
-              </td>
-              <td>{p.score}</td>
-            </tr>
-          ))}
+          {ranked.map((p) => {
+            if (prevScore === null || p.score < prevScore) {
+              displayRank += 1
+              prevScore = p.score
+            }
+            const rank = displayRank
+            return (
+              <tr key={p.id} className={p.id === playerId ? 'you' : undefined}>
+                <td>{rank}</td>
+                <td>
+                  {p.name}
+                  {p.id === playerId ? ` (${s.you})` : ''}
+                </td>
+                <td>{p.score}</td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
