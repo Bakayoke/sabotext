@@ -22,8 +22,10 @@ export type Submission = {
   id: string
   authorId: string
   text: string
-  /** true = writer's original (not voteable alone; shown for context) */
+  /** true = player's own write (shown in sabotage; not voted on) */
   isOriginal: boolean
+  /** Whose original this sabotage rewrote */
+  targetAuthorId?: string | null
 }
 
 export type RoundResult = {
@@ -33,6 +35,9 @@ export type RoundResult = {
   text: string
   votes: number
   gained: number
+  /** Original text that was sabotaged */
+  originalText?: string
+  targetName?: string
 }
 
 export type MatchHighlight = {
@@ -70,6 +75,8 @@ export type Room = {
   writerIndex: number
   originalText: string
   submissions: Submission[]
+  /** saboteur playerId → original author playerId */
+  sabotageTargets: Record<string, string>
   /** playerId → submissionId */
   votes: Record<string, string>
   endsAt: number
@@ -110,8 +117,14 @@ export type PublicRoom = {
   youAreSpectator: boolean
   prompt: { recipient: string; task: string } | null
   originalText: string | null
+  /** Whose SMS you are sabotaging */
+  sabotageTargetName: string | null
+  /** Your own write this round */
+  yourWrite: string | null
   /** Your submitted sabotage text if any */
   yourSabotage: string | null
+  writeCount: number
+  writeNeeded: number
   sabotageCount: number
   sabotageNeeded: number
   submissions: PublicSubmission[]

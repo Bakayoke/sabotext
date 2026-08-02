@@ -41,6 +41,8 @@ export type RoundResult = {
   text: string
   votes: number
   gained: number
+  originalText?: string
+  targetName?: string
 }
 
 export type PublicSubmission = {
@@ -68,7 +70,11 @@ export type PublicRoom = {
   youAreSpectator: boolean
   prompt: { recipient: string; task: string } | null
   originalText: string | null
+  sabotageTargetName: string | null
+  yourWrite: string | null
   yourSabotage: string | null
+  writeCount: number
+  writeNeeded: number
   sabotageCount: number
   sabotageNeeded: number
   submissions: PublicSubmission[]

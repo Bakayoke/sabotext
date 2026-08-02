@@ -32,6 +32,7 @@ import {
   startGame,
   startPartyCheckout,
   submitOriginal,
+  submitSabotage,
   trackMetric,
   isWeekend,
   type HomePayload,
@@ -1721,6 +1722,7 @@ function Play({
       {room.youAreSpectator && !tvMode && <p className="banner soft">{s.spectator}</p>}
 
       {room.status === 'write' && <WritePhase room={room} s={s} tvMode={tvMode} />}
+      {room.status === 'sabotage' && <SabotagePhase room={room} s={s} tvMode={tvMode} />}
       {room.status === 'vote' && <VotePhase room={room} s={s} tvMode={tvMode} />}
       {room.status === 'reveal' && <RevealPhase room={room} s={s} playerId={playerId} />}
 
@@ -1742,14 +1744,14 @@ function PromptCard({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) 
 }
 
 function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
-  const [text, setText] = useState(room.yourSabotage ?? '')
+  const [text, setText] = useState(room.yourWrite ?? '')
   const [err, setErr] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
-  const done = Boolean(room.yourSabotage)
+  const done = Boolean(room.yourWrite)
 
   useEffect(() => {
-    if (room.yourSabotage) setText(room.yourSabotage)
-  }, [room.yourSabotage])
+    if (room.yourWrite) setText(room.yourWrite)
+  }, [room.yourWrite])
 
   if (room.youAreSpectator || tvMode) {
     return (
@@ -1758,7 +1760,7 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
         <div className="pulse-dot" />
         <h2>{s.waitingWriter}</h2>
         <p className="muted">
-          {room.sabotageCount}/{room.sabotageNeeded}
+          {room.writeCount}/{room.writeNeeded}
         </p>
       </section>
     )
@@ -1771,7 +1773,7 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
         <p className="ok">{s.submitted}</p>
         <h2>{s.waitingWriter}</h2>
         <p className="muted">
-          {room.sabotageCount}/{room.sabotageNeeded}
+          {room.writeCount}/{room.writeNeeded}
         </p>
       </section>
     )
@@ -1811,6 +1813,87 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
   )
 }
 
+function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
+  const [text, setText] = useState(room.yourSabotage ?? room.originalText ?? '')
+  const [err, setErr] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+  const done = Boolean(room.yourSabotage)
+
+  useEffect(() => {
+    if (room.yourSabotage) setText(room.yourSabotage)
+    else if (room.originalText) setText((prev) => prev || room.originalText || '')
+  }, [room.yourSabotage, room.originalText])
+
+  if (room.youAreSpectator || tvMode) {
+    return (
+      <section className="phase wait">
+        <PromptCard room={room} s={s} />
+        <div className="pulse-dot" />
+        <h2>{s.waitingSabotage}</h2>
+        <p className="muted">
+          {room.sabotageCount}/{room.sabotageNeeded}
+        </p>
+      </section>
+    )
+  }
+
+  if (done) {
+    return (
+      <section className="phase wait">
+        <PromptCard room={room} s={s} />
+        <p className="ok">{s.submitted}</p>
+        <h2>{s.waitingSabotage}</h2>
+        <p className="muted">
+          {room.sabotageCount}/{room.sabotageNeeded}
+        </p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="phase">
+      <h2>{s.sabotageTitle}</h2>
+      <p className="muted">
+        {room.sabotageTargetName
+          ? s.sabotageOf.replace('{name}', room.sabotageTargetName)
+          : s.sabotageHint}
+      </p>
+      <PromptCard room={room} s={s} />
+      {room.originalText && (
+        <div className="bubble original">
+          <span>{s.original}{room.sabotageTargetName ? ` · ${room.sabotageTargetName}` : ''}</span>
+          <p>{room.originalText}</p>
+        </div>
+      )}
+      <div className="sms">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value.slice(0, 280))}
+          placeholder={s.sabotagePlaceholder}
+          rows={4}
+          maxLength={280}
+        />
+        <div className="sms-meta">{text.length}/280</div>
+      </div>
+      <button
+        type="button"
+        className="btn primary"
+        disabled={sending || text.trim().length < 2}
+        onClick={async () => {
+          setErr(null)
+          setSending(true)
+          const res = await submitSabotage(text)
+          setSending(false)
+          if (res.error) setErr(res.error)
+        }}
+      >
+        {s.submitSabotage}
+      </button>
+      {err && <p className="error">{err}</p>}
+    </section>
+  )
+}
+
 function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
   const [err, setErr] = useState<string | null>(null)
   const waiting = (room.votedCount ?? 0) < (room.voterCount ?? 0)
@@ -1823,7 +1906,7 @@ function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof
       <div className="vote-grid">
         {room.submissions.map((sub) => {
           const selected = room.yourVote === sub.id
-          const disabled = Boolean(sub.isYours) || room.youAreSpectator || Boolean(tvMode)
+          const disabled = room.youAreSpectator || Boolean(tvMode)
           return (
             <button
               key={sub.id}
@@ -1896,6 +1979,13 @@ function RevealPhase({
           <li key={r.submissionId}>
             <div>
               <strong>{r.authorName}</strong>
+              {r.targetName && (
+                <span className="muted sab-of">
+                  {' '}
+                  → {r.targetName}
+                </span>
+              )}
+              {r.originalText && <p className="muted orig-line">{r.originalText}</p>}
               <p>{r.text}</p>
             </div>
             <span>

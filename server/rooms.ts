@@ -122,6 +122,7 @@ export function createRoom(
     writerIndex: -1,
     originalText: '',
     submissions: [],
+    sabotageTargets: {},
     votes: {},
     endsAt: 0,
     lastRound: null,
@@ -237,6 +238,7 @@ export function hydrateRooms(list: Room[]) {
       highlights: Array.isArray(raw.highlights) ? raw.highlights : [],
       isPublic: Boolean(raw.isPublic),
       waitlist: Array.isArray(raw.waitlist) ? raw.waitlist : [],
+      sabotageTargets: raw.sabotageTargets ?? {},
       premiumExpiresAt: raw.premiumExpiresAt ?? null,
       players: (raw.players ?? []).map((p) => ({ ...p, connected: false })),
       status:
@@ -532,6 +534,7 @@ function beginRound(room: Room) {
     room.prompt = null
     room.originalText = ''
     room.submissions = []
+    room.sabotageTargets = {}
     room.votes = {}
     trackFunnel('game_finished', room.code)
     return
@@ -556,6 +559,7 @@ function beginRound(room: Room) {
 
   room.originalText = ''
   room.submissions = []
+  room.sabotageTargets = {}
   room.votes = {}
   room.lastRound = null
   room.status = 'write'
@@ -566,7 +570,7 @@ function writers(room: Room) {
   return playingPlayers(room).filter((p) => p.connected)
 }
 
-/** Everyone writes their own message for the prompt; no timers. */
+/** Everyone writes their own SMS for the prompt. */
 export function submitOriginal(
   code: string,
   playerId: string,
@@ -574,13 +578,8 @@ export function submitOriginal(
 ): Room | { error: string } {
   const room = rooms.get(code)
   if (!room) return { error: 'Rummet finns inte' }
-  // Legacy rooms mid-sabotage: treat as write
-  if (room.status !== 'write' && room.status !== 'sabotage') {
+  if (room.status !== 'write') {
     return { error: 'Inte skrivfas just nu' }
-  }
-  if (room.status === 'sabotage') {
-    room.status = 'write'
-    room.endsAt = 0
   }
 
   const player = room.players.find((p) => p.id === playerId)
@@ -593,36 +592,104 @@ export function submitOriginal(
     }
   }
 
-  const existing = room.submissions.find((s) => s.authorId === playerId)
+  const existing = room.submissions.find((s) => s.authorId === playerId && s.isOriginal)
   if (existing) {
     existing.text = cleaned
-    existing.isOriginal = false
   } else {
     room.submissions.push({
       id: crypto.randomUUID(),
       authorId: playerId,
       text: cleaned,
-      isOriginal: false,
+      isOriginal: true,
     })
   }
 
   const needed = writers(room)
   const done =
     needed.length > 0 &&
-    needed.every((p) => room.submissions.some((s) => s.authorId === p.id))
-  if (done) enterVote(room)
+    needed.every((p) => room.submissions.some((s) => s.authorId === p.id && s.isOriginal))
+  if (done) enterSabotage(room)
 
   touch(room)
   return room
 }
 
-/** @deprecated Alias — everyone writes via submitOriginal now */
+function enterSabotage(room: Room) {
+  const needed = writers(room)
+  const order = shuffle(needed.map((p) => p.id))
+  room.sabotageTargets = {}
+  for (let i = 0; i < order.length; i++) {
+    const saboteur = order[i]!
+    const target = order[(i + 1) % order.length]!
+    room.sabotageTargets[saboteur] = target
+  }
+  // Drop any leftover sabotages from a weird mid-round state
+  room.submissions = room.submissions.filter((s) => s.isOriginal)
+  room.votes = {}
+  room.status = 'sabotage'
+  room.endsAt = 0
+}
+
+/** Rewrite the SMS you were assigned. */
 export function submitSabotage(
   code: string,
   playerId: string,
   text: string,
 ): Room | { error: string } {
-  return submitOriginal(code, playerId, text)
+  const room = rooms.get(code)
+  if (!room) return { error: 'Rummet finns inte' }
+  if (room.status !== 'sabotage') {
+    return { error: 'Inte sabotagefas just nu' }
+  }
+
+  const player = room.players.find((p) => p.id === playerId)
+  if (!player?.playing) return { error: 'Du spelar inte' }
+
+  const targetAuthorId = room.sabotageTargets[playerId]
+  if (!targetAuthorId) {
+    return {
+      error: room.language === 'en' ? 'No text to sabotage' : 'Ingen text att sabotera',
+    }
+  }
+
+  const original = room.submissions.find(
+    (s) => s.authorId === targetAuthorId && s.isOriginal,
+  )
+  if (!original) {
+    return {
+      error: room.language === 'en' ? 'Original missing' : 'Originalet saknas',
+    }
+  }
+
+  const cleaned = text.trim().slice(0, 280)
+  if (cleaned.length < 2) {
+    return {
+      error: room.language === 'en' ? 'Write a bit more' : 'Skriv lite mer',
+    }
+  }
+
+  const existing = room.submissions.find((s) => s.authorId === playerId && !s.isOriginal)
+  if (existing) {
+    existing.text = cleaned
+    existing.targetAuthorId = targetAuthorId
+  } else {
+    room.submissions.push({
+      id: crypto.randomUUID(),
+      authorId: playerId,
+      text: cleaned,
+      isOriginal: false,
+      targetAuthorId,
+    })
+  }
+
+  const needed = writers(room)
+  const done =
+    needed.length > 0 &&
+    needed.every((p) => room.submissions.some((s) => s.authorId === p.id && !s.isOriginal))
+  if (done) enterVote(room)
+
+  touch(room)
+  return room
 }
 
 function enterVote(room: Room) {
@@ -653,11 +720,6 @@ export function castVote(
 
   const target = room.submissions.find((s) => s.id === submissionId && !s.isOriginal)
   if (!target) return { error: 'Ogiltigt val' }
-  if (target.authorId === playerId) {
-    return {
-      error: room.language === 'en' ? "Can't vote for your own" : 'Du kan inte rösta på dig själv',
-    }
-  }
 
   room.votes[playerId] = submissionId
 
@@ -681,7 +743,7 @@ function pushHighlight(room: Room, winner: RoundResult) {
   const highlight: MatchHighlight = {
     round: room.currentRound,
     promptTask,
-    originalText: promptTask,
+    originalText: winner.originalText || promptTask,
     winnerText: winner.text,
     authorName: winner.authorName,
     votes: winner.votes,
@@ -713,6 +775,12 @@ export function resolveVote(room: Room) {
   const results: RoundResult[] = []
   ranked.forEach((s) => {
     const author = room.players.find((p) => p.id === s.authorId)
+    const target = s.targetAuthorId
+      ? room.players.find((p) => p.id === s.targetAuthorId)
+      : undefined
+    const original = s.targetAuthorId
+      ? room.submissions.find((o) => o.authorId === s.targetAuthorId && o.isOriginal)
+      : undefined
     const votes = tally.get(s.id) ?? 0
     let gained = 0
     if (!tied && votes === topVotes && votes > 0) gained = 1000
@@ -724,6 +792,8 @@ export function resolveVote(room: Room) {
       text: s.text,
       votes,
       gained,
+      originalText: original?.text,
+      targetName: target?.name,
     })
   })
 
@@ -839,13 +909,26 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
   const tier = tierFromExpiry(room.premiumExpiresAt)
   const limits = limitsFor(tier)
 
+  const yourWrite =
+    room.submissions.find((s) => s.authorId === viewerId && s.isOriginal)?.text ?? null
   const yourSabotage =
     room.submissions.find((s) => s.authorId === viewerId && !s.isOriginal)?.text ?? null
 
   const neededPlayers = writers(room)
   const writeDone = neededPlayers.filter((p) =>
+    room.submissions.some((s) => s.authorId === p.id && s.isOriginal),
+  ).length
+  const sabotageDone = neededPlayers.filter((p) =>
     room.submissions.some((s) => s.authorId === p.id && !s.isOriginal),
   ).length
+
+  const targetAuthorId = room.sabotageTargets[viewerId]
+  const targetOriginal = targetAuthorId
+    ? room.submissions.find((s) => s.authorId === targetAuthorId && s.isOriginal)
+    : undefined
+  const targetPlayer = targetAuthorId
+    ? room.players.find((p) => p.id === targetAuthorId)
+    : undefined
 
   let submissions: PublicRoom['submissions'] = []
 
@@ -887,7 +970,7 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
     language: lang,
     roundCount: room.roundCount,
     hostPlays: room.hostPlays,
-    status: room.status === 'sabotage' ? 'write' : room.status,
+    status: room.status,
     currentRound: room.currentRound,
     totalRounds: room.roundCount,
     writerId: null,
@@ -900,9 +983,15 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
           task: localize(room.prompt.task, lang),
         }
       : null,
-    originalText: null,
+    originalText:
+      room.status === 'sabotage' ? (targetOriginal?.text ?? null) : null,
+    sabotageTargetName:
+      room.status === 'sabotage' ? (targetPlayer?.name ?? null) : null,
+    yourWrite,
     yourSabotage,
-    sabotageCount: writeDone,
+    writeCount: writeDone,
+    writeNeeded: neededPlayers.length,
+    sabotageCount: sabotageDone,
     sabotageNeeded: neededPlayers.length,
     submissions,
     yourVote: room.votes[viewerId] ?? null,
@@ -910,7 +999,7 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
     voterCount: voteEligible(room).length,
     endsAt,
     lastRound: room.lastRound,
-    phaseSeconds: phaseSeconds(room.status === 'sabotage' ? 'write' : room.status),
+    phaseSeconds: phaseSeconds(room.status),
     premiumTier: tier,
     premiumExpiresAt: room.premiumExpiresAt,
     limits,
