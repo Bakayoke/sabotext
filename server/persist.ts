@@ -82,11 +82,29 @@ async function dirExists(dir: string) {
   }
 }
 
-export async function initPersist(): Promise<{ backend: string | null }> {
-  const redisUrl =
+function resolveRedisUrl(): string | null {
+  const direct =
     process.env.REDIS_URL?.trim() ||
     process.env.REDIS_PRIVATE_URL?.trim() ||
-    process.env.REDIS_PUBLIC_URL?.trim()
+    process.env.REDIS_PUBLIC_URL?.trim() ||
+    process.env.REDISCONNECTIONSTRING?.trim()
+  if (direct) return direct
+
+  const host = process.env.REDISHOST?.trim() || process.env.REDIS_HOST?.trim()
+  const port = process.env.REDISPORT?.trim() || process.env.REDIS_PORT?.trim() || '6379'
+  const user = process.env.REDISUSER?.trim() || process.env.REDIS_USER?.trim() || 'default'
+  const password = process.env.REDISPASSWORD?.trim() || process.env.REDIS_PASSWORD?.trim()
+  if (host && password) {
+    return `redis://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}`
+  }
+  if (host) {
+    return `redis://${host}:${port}`
+  }
+  return null
+}
+
+export async function initPersist(): Promise<{ backend: string | null }> {
+  const redisUrl = resolveRedisUrl()
   const dataDir =
     process.env.SABOTEXT_DATA_DIR?.trim() ||
     ((await dirExists('/data')) ? '/data' : '')
@@ -95,9 +113,11 @@ export async function initPersist(): Promise<{ backend: string | null }> {
     if (redisUrl) {
       backend = await redisBackend(redisUrl)
       lastError = null
+      console.log('Persist: connected to Redis')
     } else if (dataDir) {
       backend = fileBackend(dataDir)
       lastError = null
+      console.log(`Persist: using file backend at ${dataDir}`)
     } else {
       backend = null
     }

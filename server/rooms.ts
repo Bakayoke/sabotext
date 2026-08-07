@@ -229,33 +229,51 @@ export function allRooms() {
 
 export function hydrateRooms(list: Room[]) {
   const now = Date.now()
+  const playStatuses = new Set<RoomStatus>(['write', 'sabotage', 'vote', 'reveal'])
   for (const raw of list) {
     if (!raw?.code || rooms.has(raw.code)) continue
     if (raw.updatedAt && now - raw.updatedAt > ROOM_IDLE_MS) {
       if (!raw.premiumExpiresAt || raw.premiumExpiresAt <= now) continue
     }
+
+    const status: RoomStatus =
+      raw.status === 'lobby' ||
+      raw.status === 'write' ||
+      raw.status === 'sabotage' ||
+      raw.status === 'vote' ||
+      raw.status === 'reveal' ||
+      raw.status === 'finished'
+        ? raw.status
+        : 'lobby'
+
     const room: Room = {
       ...raw,
+      code: String(raw.code).toUpperCase(),
       highlights: Array.isArray(raw.highlights) ? raw.highlights : [],
       isPublic: Boolean(raw.isPublic),
       waitlist: Array.isArray(raw.waitlist) ? raw.waitlist : [],
       sabotageTargets: raw.sabotageTargets ?? {},
       voteOrder: Array.isArray(raw.voteOrder) ? raw.voteOrder : [],
+      usedPromptIds: Array.isArray(raw.usedPromptIds) ? raw.usedPromptIds : [],
+      writerOrder: Array.isArray(raw.writerOrder) ? raw.writerOrder : [],
       premiumExpiresAt: raw.premiumExpiresAt ?? null,
       players: (raw.players ?? []).map((p) => ({ ...p, connected: false })),
-      status:
-        raw.status === 'write' ||
-        raw.status === 'sabotage' ||
-        raw.status === 'vote' ||
-        raw.status === 'reveal'
-          ? 'lobby'
-          : raw.status,
-      submissions: [],
-      votes: {},
-      endsAt: 0,
-      lastRound: null,
+      status,
+      // Keep mid-match state so redeploys don't wipe active games
+      submissions: Array.isArray(raw.submissions) ? raw.submissions : [],
+      votes: raw.votes && typeof raw.votes === 'object' ? { ...raw.votes } : {},
+      lastRound: raw.lastRound ?? null,
+      prompt: raw.prompt ?? null,
+      originalText: raw.originalText ?? '',
+      endsAt: typeof raw.endsAt === 'number' ? raw.endsAt : 0,
       updatedAt: raw.updatedAt ?? now,
     }
+
+    // Soft-advance reveal if the timer already elapsed while we were down
+    if (playStatuses.has(room.status) && room.status === 'reveal' && room.endsAt > 0 && room.endsAt <= now) {
+      room.endsAt = now
+    }
+
     rooms.set(room.code, room)
   }
 }

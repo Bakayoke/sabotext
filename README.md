@@ -38,13 +38,14 @@ npm run dev
 ### Railway (API + sockets)
 
 1. Skapa tjänst från GitHub-repot (Node start: `npm start`).
-2. Lägg till Redis-plugin (rekommenderas för Party-pass + rum).
+2. Lägg till Redis-plugin och länka URL till API-tjänsten:
+   - `REDIS_URL=${{Redis.REDIS_URL}}` (eller klistra in Redis-URL)
 3. Sätt bland annat:
    - `PUBLIC_APP_URL=https://sabotext.com`
    - `STRIPE_SECRET_KEY=sk_live_…`
    - `STRIPE_WEBHOOK_SECRET=whsec_…` (endpoint: `https://<railway>/api/stripe/webhook`, event `checkout.session.completed`)
-   - `REDIS_URL=…`
-4. Verifiera: `GET /api/health` → `persist.configured` + `stripe: true`.
+4. Verifiera: `GET /api/health` → `persist.configured: true` + `stripe: true`.
+   Då överlever rum (även mitt i match) och Party-pass redeploys.
 
 ### Cloudflare (frontend)
 
