@@ -34,7 +34,7 @@ import {
   activatePartyPass,
   applyPartyToken,
 } from './rooms.js'
-import { allPasses, redeemPassCode, restorePasses, setPassPersistHook } from './premium.js'
+import { allPasses, redeemPassCode, restorePasses, setPassPersistHook, partyCodesConfiguredCount } from './premium.js'
 import {
   claimPartyCheckoutSession,
   createPartyCheckoutSession,
@@ -94,6 +94,7 @@ app.get('/api/health', (_req, res) => {
     stripe: diag.configured,
     stripeDiag: diag,
     persist: persistDiagnostics(),
+    partyCodesConfigured: partyCodesConfiguredCount(),
     rounds: getAllowedRounds(),
   })
 })
@@ -255,10 +256,15 @@ io.on('connection', (socket) => {
 
   socket.on('activateParty', ({ code: passCode }, ack) => {
     const binding = getBinding(socket.id)
-    if (!binding) return ack?.({ error: 'Inte ansluten' })
+    if (!binding) return ack?.({ error: 'Inte ansluten till ett rum — skapa eller gå med först' })
     const result = activatePartyPass(binding.code, binding.playerId, String(passCode ?? ''))
     if ('error' in result) return ack?.({ error: result.error })
-    ack?.({ ok: true, token: result.pass.token, expiresAt: result.pass.expiresAt })
+    ack?.({
+      ok: true,
+      token: result.pass.token,
+      expiresAt: result.pass.expiresAt,
+      room: toPublicRoom(result.room, binding.playerId),
+    })
     broadcastRoom(result.room.code)
   })
 

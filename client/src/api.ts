@@ -338,7 +338,9 @@ export function redeemParty(code: string) {
 }
 
 export function activateParty(code: string) {
-  return emitAck<{ ok?: boolean; token: string; expiresAt: number }>('activateParty', { code })
+  return emitAck<{ ok?: boolean; token: string; expiresAt: number; room?: PublicRoom }>('activateParty', {
+    code,
+  })
 }
 
 export function applyStoredPartyToken() {

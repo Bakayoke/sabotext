@@ -1,3 +1,5 @@
+import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto'
+
 export type PremiumTier = 'free' | 'party'
 
 export type PremiumLimits = {
@@ -40,14 +42,35 @@ function touchPasses() {
   onPersist?.()
 }
 
+function tokenSecret(): string {
+  return (
+    process.env.PARTY_TOKEN_SECRET?.trim() ||
+    process.env.PARTY_PASS_CODES?.trim() ||
+    'sabotext-dev-pass-secret'
+  )
+}
+
+/** Normalize promo codes: trim, strip wrapping quotes, uppercase. */
+export function normalizePassCode(code: string): string {
+  return code
+    .trim()
+    .replace(/^["']+|["']+$/g, '')
+    .replace(/\s+/g, '')
+    .toUpperCase()
+}
+
 function configuredPassCodes(): Set<string> {
   const raw = process.env.PARTY_PASS_CODES ?? 'LinusÄrBästHundraProcent'
   return new Set(
     raw
-      .split(',')
-      .map((s) => s.trim().toUpperCase())
+      .split(/[,;\n]+/)
+      .map((s) => normalizePassCode(s))
       .filter(Boolean),
   )
+}
+
+export function partyCodesConfiguredCount(): number {
+  return configuredPassCodes().size
 }
 
 export function limitsFor(tier: PremiumTier): PremiumLimits {
@@ -62,12 +85,40 @@ export function tierFromExpiry(expiresAt: number | null | undefined): PremiumTie
   return isPartyActive(expiresAt) ? 'party' : 'free'
 }
 
+function signPayload(id: string, expiresAt: number): string {
+  return createHmac('sha256', tokenSecret()).update(`${id}.${expiresAt}`).digest('base64url')
+}
+
+function encodeToken(id: string, expiresAt: number): string {
+  return `st1.${id}.${expiresAt}.${signPayload(id, expiresAt)}`
+}
+
+function decodeSignedToken(token: string): PartyPass | null {
+  const parts = token.split('.')
+  if (parts.length !== 4 || parts[0] !== 'st1') return null
+  const id = parts[1]
+  const expiresAt = Number(parts[2])
+  const sig = parts[3]
+  if (!id || !Number.isFinite(expiresAt) || expiresAt <= Date.now() || !sig) return null
+  const expected = signPayload(id, expiresAt)
+  try {
+    const a = Buffer.from(sig)
+    const b = Buffer.from(expected)
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null
+  } catch {
+    return null
+  }
+  return { token, tier: 'party', expiresAt }
+}
+
 export function issuePartyPass(plan: PartyPlan = 'day'): PartyPass {
   const duration = plan === 'week' ? PARTY_WEEK_MS : PARTY_PASS_MS
+  const expiresAt = Date.now() + duration
+  const id = randomUUID()
   const pass: PartyPass = {
-    token: crypto.randomUUID(),
+    token: encodeToken(id, expiresAt),
     tier: 'party',
-    expiresAt: Date.now() + duration,
+    expiresAt,
     plan,
   }
   passes.set(pass.token, pass)
@@ -88,22 +139,33 @@ export function allPasses() {
 }
 
 export function redeemPassCode(code: string): PartyPass | { error: string } {
-  const normalized = code.trim().toUpperCase()
+  const normalized = normalizePassCode(code)
   if (!normalized) return { error: 'Ange en party-kod' }
   if (!configuredPassCodes().has(normalized)) {
     return { error: 'Ogiltig party-kod' }
   }
-  return issuePartyPass()
+  return issuePartyPass('day')
 }
 
 export function lookupPass(token: string | null | undefined): PartyPass | null {
   if (!token) return null
-  const pass = passes.get(token)
-  if (!pass) return null
-  if (pass.expiresAt <= Date.now()) {
-    passes.delete(token)
-    touchPasses()
-    return null
+
+  const cached = passes.get(token)
+  if (cached) {
+    if (cached.expiresAt <= Date.now()) {
+      passes.delete(token)
+      touchPasses()
+      return null
+    }
+    return cached
   }
-  return pass
+
+  // Stateless verify — works across Railway restarts / multiple instances without Redis
+  const signed = decodeSignedToken(token)
+  if (signed) {
+    passes.set(token, signed)
+    return signed
+  }
+
+  return null
 }

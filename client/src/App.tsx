@@ -717,6 +717,8 @@ export default function App() {
             setTvMode={setTvMode}
             onLeave={leave}
             onError={setError}
+            onRoom={setRoom}
+            onPartyUnlocked={() => setPartyFlash(s.partyUnlockedBanner)}
             error={error}
             partyInfo={partyInfo}
             buyDayLabel={buyDayLabel}
@@ -1035,9 +1037,11 @@ function Home({
                 <div className="party-redeem">
                   <input
                     value={ownerCode}
-                    onChange={(e) => setOwnerCode(e.target.value)}
+                    onChange={(e) => setOwnerCode(e.target.value.toUpperCase())}
                     placeholder={s.partyCode}
                     maxLength={64}
+                    autoComplete="off"
+                    spellCheck={false}
                   />
                   <button
                     type="button"
@@ -1246,6 +1250,8 @@ function Lobby({
   setTvMode,
   onLeave,
   onError,
+  onRoom,
+  onPartyUnlocked,
   error,
   partyInfo,
   buyDayLabel,
@@ -1263,6 +1269,8 @@ function Lobby({
   setTvMode: (v: boolean | ((prev: boolean) => boolean)) => void
   onLeave: () => void
   onError: (e: string | null) => void
+  onRoom: (room: PublicRoom) => void
+  onPartyUnlocked: () => void
   error: string | null
   partyInfo: PartyInfo
   buyDayLabel: string
@@ -1358,7 +1366,11 @@ function Lobby({
       return
     }
     savePartyPass({ token: res.token, expiresAt: res.expiresAt })
-    await applyStoredPartyToken()
+    if (res.room) onRoom(res.room)
+    else await applyStoredPartyToken()
+    setPartyCode('')
+    setShowCode(false)
+    onPartyUnlocked()
   }
 
   async function changePublic(next: boolean) {
@@ -1502,6 +1514,35 @@ function Lobby({
         </div>
       )}
 
+      {!isParty && isHost && !tvMode && (
+        <div className="panel tight hide-on-tv party-code-panel">
+          <p className="section-title">{s.party}</p>
+          <button type="button" className="btn-tiny" onClick={() => setShowCode((v) => !v)}>
+            {showCode ? s.hideCode : s.haveCode}
+          </button>
+          {showCode && (
+            <div className="party-redeem">
+              <input
+                value={partyCode}
+                onChange={(e) => setPartyCode(e.target.value.toUpperCase())}
+                placeholder={s.partyCode}
+                maxLength={64}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={localBusy || !partyCode.trim()}
+                onClick={() => void onUnlockParty()}
+              >
+                {localBusy ? s.connecting : s.activate}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {needsUpsell && !tvMode && (
         <div className="party-banner urgent-inline hide-on-tv">
           <p className="party-hint">
@@ -1540,31 +1581,6 @@ function Lobby({
           <button type="button" className="btn secondary sm" onClick={() => void shareBuy()}>
             {buyCopied ? s.buyLinkCopied : s.shareBuyLink}
           </button>
-          {isHost && (
-            <>
-              <button type="button" className="btn-tiny" onClick={() => setShowCode((v) => !v)}>
-                {showCode ? s.hideCode : s.haveCode}
-              </button>
-              {showCode && (
-                <div className="party-redeem">
-                  <input
-                    value={partyCode}
-                    onChange={(e) => setPartyCode(e.target.value.toUpperCase())}
-                    placeholder={s.partyCode}
-                    maxLength={64}
-                  />
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    disabled={localBusy}
-                    onClick={() => void onUnlockParty()}
-                  >
-                    {s.activate}
-                  </button>
-                </div>
-              )}
-            </>
-          )}
           {!partyInfo.enabled && <p className="footer-note">{s.buyPartySoon}</p>}
         </div>
       )}
