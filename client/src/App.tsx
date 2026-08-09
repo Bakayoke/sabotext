@@ -52,6 +52,7 @@ const FREE_ROUND_OPTIONS = [8, 10, 12, 15]
 const PARTY_EXTRA_ROUNDS = [20, 25]
 const FACTOPIA_URL = 'https://factopia.net'
 const PARTY_PATHS_URL = 'https://partypaths.com'
+const SCOURGEBORN_URL = 'https://scourgeborn.com'
 const PENDING_ROOM_KEY = 'sabotext-pending-room'
 const RESUME_CHECKOUT_KEY = 'sabotext-resume-checkout'
 
@@ -93,6 +94,11 @@ function SisterLinks({
         <strong>Party Paths</strong>
         <span>{s.partyPathsPitch}</span>
         <em>{s.partyPathsCta}</em>
+      </a>
+      <a className={cls} href={SCOURGEBORN_URL} target="_blank" rel="noreferrer">
+        <strong>Scourgeborn</strong>
+        <span>{s.scourgebornPitch}</span>
+        <em>{s.scourgebornCta}</em>
       </a>
     </div>
   )
