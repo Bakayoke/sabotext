@@ -1,9 +1,7 @@
 import { io, Socket } from 'socket.io-client'
-import type { Lang, PartyPassLocal, PublicRoom } from './types'
+import type { Lang, PublicRoom } from './types'
 
 const SESSION_KEY = 'sabotext-session'
-const PARTY_PASS_KEY = 'sabotext-party-pass'
-const HAS_PAID_KEY = 'sabotext-has-paid'
 export const NAME_KEY = 'sabotext-name'
 export const GANG_KEY = 'sabotext-gang'
 
@@ -105,50 +103,6 @@ export function clearGang() {
   } catch {
     // ignore
   }
-}
-
-export function loadPartyPass(): PartyPassLocal | null {
-  try {
-    const raw = localStorage.getItem(PARTY_PASS_KEY)
-    if (!raw) return null
-    const pass = JSON.parse(raw) as PartyPassLocal
-    if (!pass?.token || !pass?.expiresAt || pass.expiresAt <= Date.now()) {
-      localStorage.removeItem(PARTY_PASS_KEY)
-      return null
-    }
-    return pass
-  } catch {
-    return null
-  }
-}
-
-export function savePartyPass(pass: PartyPassLocal) {
-  localStorage.setItem(PARTY_PASS_KEY, JSON.stringify(pass))
-}
-
-export function clearPartyPass() {
-  localStorage.removeItem(PARTY_PASS_KEY)
-}
-
-export function hasPaidBefore(): boolean {
-  try {
-    return localStorage.getItem(HAS_PAID_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
-export function markPaidBefore() {
-  try {
-    localStorage.setItem(HAS_PAID_KEY, '1')
-  } catch {
-    // ignore
-  }
-}
-
-export function isWeekend(date = new Date()) {
-  const day = date.getDay()
-  return day === 0 || day === 5 || day === 6
 }
 
 let socket: Socket | null = null
@@ -278,7 +232,7 @@ type Ack<T> = T & { error?: string }
 async function emitAck<T>(event: string, data: unknown): Promise<Ack<T>> {
   try {
     const s = await whenConnected()
-    if (event !== 'create' && event !== 'join' && event !== 'rejoin' && event !== 'redeemParty') {
+    if (event !== 'create' && event !== 'join' && event !== 'rejoin') {
       await ensureSessionBound(2)
     }
     return await new Promise<Ack<T>>((resolve) => {
@@ -293,13 +247,11 @@ async function emitAck<T>(event: string, data: unknown): Promise<Ack<T>> {
 }
 
 export function createGame(name: string, roundCount: number, hostPlays: boolean, language: Lang) {
-  const pass = loadPartyPass()
   return emitAck<{ playerId: string; room: PublicRoom }>('create', {
     name,
     roundCount,
     hostPlays,
     language,
-    partyToken: pass?.token ?? null,
   })
 }
 
@@ -333,24 +285,6 @@ export function setPublicLobby(isPublic: boolean) {
   return emitAck<{ ok?: boolean }>('setPublicLobby', { isPublic })
 }
 
-export function redeemParty(code: string) {
-  return emitAck<{ token: string; expiresAt: number }>('redeemParty', { code })
-}
-
-export function activateParty(code: string) {
-  return emitAck<{ ok?: boolean; token: string; expiresAt: number; room?: PublicRoom }>('activateParty', {
-    code,
-  })
-}
-
-export function applyStoredPartyToken() {
-  const pass = loadPartyPass()
-  if (!pass) {
-    return Promise.resolve({ error: 'Inget party-pass sparat' } as Ack<{ ok?: boolean }>)
-  }
-  return emitAck<{ ok?: boolean }>('applyPartyToken', { token: pass.token })
-}
-
 export function startGame() {
   return emitAck<{ ok?: boolean }>('start', {})
 }
@@ -369,19 +303,6 @@ export function submitSabotage(text: string) {
 
 export function castVote(submissionId: string) {
   return emitAck<{ ok?: boolean }>('castVote', { submissionId })
-}
-
-export type PartyInfo = {
-  enabled: boolean
-  amountOre: number
-  amountLabel: string
-  durationHours: number
-  weekAmountOre?: number
-  weekAmountLabel?: string
-  weekDurationHours?: number
-  firstPartyPercentOff?: number
-  firstPartyDayLabel?: string
-  firstPartyWeekLabel?: string
 }
 
 export async function fetchHome(lang: Lang): Promise<HomePayload> {
@@ -410,110 +331,8 @@ export async function fetchLobbies(lang: Lang): Promise<LobbiesPayload> {
   }
 }
 
-export async function fetchPartyInfo(): Promise<PartyInfo> {
-  try {
-    const res = await fetch(`${apiBase()}/api/party/info`)
-    if (!res.ok) throw new Error('info failed')
-    return (await res.json()) as PartyInfo
-  } catch {
-    return {
-      enabled: false,
-      amountOre: 3900,
-      amountLabel: '39 kr',
-      durationHours: 24,
-      weekAmountOre: 9900,
-      weekAmountLabel: '99 kr',
-      weekDurationHours: 168,
-    }
-  }
-}
-
-export async function fetchStripeHint(): Promise<string | null> {
-  try {
-    const res = await fetch(`${apiBase()}/api/health`)
-    if (!res.ok) return null
-    const data = (await res.json()) as {
-      stripeDiag?: { hint?: string | null; envPrefixes?: Record<string, string | null> }
-    }
-    if (data.stripeDiag?.hint) return data.stripeDiag.hint
-    const prefix = data.stripeDiag?.envPrefixes?.STRIPE_SECRET_KEY
-    if (prefix?.startsWith('pk_')) {
-      return 'Du har Publishable key (pk_…) i Railway. Byt till Secret key (sk_…).'
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-export async function startPartyCheckout(
-  locale: 'sv' | 'en',
-  roomCode?: string,
-  plan: 'day' | 'week' = 'day',
-  firstTime = false,
-) {
-  try {
-    const res = await fetch(`${apiBase()}/api/party/checkout`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        locale,
-        roomCode: roomCode ?? null,
-        plan,
-        firstTime,
-      }),
-    })
-    const data = (await res.json()) as { url?: string; error?: string }
-    if (!res.ok || !data.url) return { error: data.error || 'Kunde inte starta köp' }
-    return { url: data.url }
-  } catch {
-    return { error: 'Kunde inte nå betalningen' }
-  }
-}
-
-export async function claimPartySession(sessionId: string) {
-  try {
-    const res = await fetch(`${apiBase()}/api/party/claim`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId }),
-    })
-    const data = (await res.json()) as {
-      token?: string
-      expiresAt?: number
-      roomCode?: string | null
-      error?: string
-    }
-    if (!res.ok || !data.token || !data.expiresAt) {
-      return { error: data.error || 'Kunde inte hämta Party' }
-    }
-    return {
-      token: data.token,
-      expiresAt: data.expiresAt,
-      roomCode: data.roomCode || undefined,
-    }
-  } catch {
-    return { error: 'Kunde inte hämta Party' }
-  }
-}
-
 export async function trackMetric(
-  event:
-    | 'room_full'
-    | 'waitlist_join'
-    | 'checkout_start'
-    | 'checkout_cancel'
-    | 'checkout_paid'
-    | 'guest_unlock_click'
-    | 'group_size_upsell'
-    | 'public_requires_party'
-    | 'game_start'
-    | 'game_finished'
-    | 'share_results'
-    | 'lobby_almost_full'
-    | 'waitlist_upsell_shown'
-    | 'share_buy_click'
-    | 'party_renew_click',
+  event: 'room_full' | 'waitlist_join' | 'game_start' | 'game_finished' | 'share_results' | 'lobby_almost_full',
   meta?: string,
 ) {
   try {

@@ -30,18 +30,8 @@ import {
   castVote,
   toPublicRoom,
   getAllowedRounds,
-  unlockRoomWithPass,
-  activatePartyPass,
-  applyPartyToken,
 } from './rooms.js'
-import { allPasses, redeemPassCode, restorePasses, setPassPersistHook, partyCodesConfiguredCount } from './premium.js'
-import {
-  claimPartyCheckoutSession,
-  createPartyCheckoutSession,
-  handleStripeWebhook,
-  partyCheckoutPublicInfo,
-  stripeEnvDiagnostics,
-} from './stripe.js'
+import { allPasses, restorePasses, setPassPersistHook } from './premium.js'
 import { buildSnapshot, flushPersist, initPersist, loadSnapshot, persistDiagnostics, scheduleSave } from './persist.js'
 import { funnelSnapshot, publicActivity, trackFunnel, type FunnelEvent } from './metrics.js'
 import { exampleHighlights, localize, todaysTheme } from './prompts.js'
@@ -72,46 +62,26 @@ app.use(
   }),
 )
 
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const result = await handleStripeWebhook(
-    Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body ?? {})),
-    req.headers['stripe-signature'] as string | undefined,
-  )
-  if ('error' in result) {
-    res.status(result.status).send(result.error)
-    return
-  }
-  res.json({ received: true })
-})
-
 app.use(express.json())
 
 app.get('/api/health', (_req, res) => {
-  const diag = stripeEnvDiagnostics()
   res.json({
     ok: true,
     name: 'sabotext',
-    stripe: diag.configured,
-    stripeDiag: diag,
+    free: true,
     persist: persistDiagnostics(),
-    partyCodesConfigured: partyCodesConfiguredCount(),
     rounds: getAllowedRounds(),
   })
-})
-
-app.get('/api/party/info', (_req, res) => {
-  res.json(partyCheckoutPublicInfo())
 })
 
 app.get('/api/lobbies', (req, res) => {
   const lang = req.query.lang === 'en' ? 'en' : req.query.lang === 'sv' ? 'sv' : null
   const lobbies = listPublicLobbies({ language: lang, limit: 24 })
-  const theme = partyCheckoutPublicInfo().weekThemePack
   const live = liveActivity()
   res.json({
     lobbies,
     onlineRooms: lobbies.length,
-    weekThemePack: theme,
+    weekThemePack: null,
     activity: publicActivity(live),
   })
 })
@@ -128,42 +98,6 @@ app.get('/api/home', (req, res) => {
     },
     examples: exampleHighlights(lang),
     activity: publicActivity(live),
-  })
-})
-
-app.post('/api/party/checkout', async (req, res) => {
-  const locale = req.body?.locale === 'en' ? 'en' : 'sv'
-  const roomCode = typeof req.body?.roomCode === 'string' ? req.body.roomCode : null
-  const plan = req.body?.plan === 'week' ? 'week' : 'day'
-  const firstTime = Boolean(req.body?.firstTime)
-  trackFunnel('checkout_start', roomCode || plan)
-  if (firstTime) trackFunnel('group_size_upsell', 'first_time')
-  const result = await createPartyCheckoutSession({ locale, roomCode, plan, firstTime })
-  if ('error' in result) {
-    res.status(400).json(result)
-    return
-  }
-  res.json(result)
-})
-
-app.post('/api/party/claim', async (req, res) => {
-  const sessionId = String(req.body?.sessionId ?? '')
-  const result = await claimPartyCheckoutSession(sessionId)
-  if ('error' in result) {
-    res.status(400).json({ error: result.error })
-    return
-  }
-  trackFunnel('checkout_paid', result.roomCode || undefined)
-  if (result.roomCode && result.token) {
-    const unlocked = unlockRoomWithPass(result.roomCode, result.token)
-    if (!('error' in unlocked)) {
-      broadcastRoom(unlocked.code)
-    }
-  }
-  res.json({
-    token: result.token,
-    expiresAt: result.expiresAt,
-    roomCode: result.roomCode || null,
   })
 })
 
@@ -229,7 +163,7 @@ function broadcastRoom(roomCode: string) {
 }
 
 io.on('connection', (socket) => {
-  socket.on('create', ({ name, roundCount, hostPlays, language, partyToken }, ack) => {
+  socket.on('create', ({ name, roundCount, hostPlays, language }, ack) => {
     try {
       const { room, playerId } = createRoom(
         name,
@@ -237,7 +171,6 @@ io.on('connection', (socket) => {
         socket.id,
         hostPlays !== false,
         language === 'en' ? 'en' : 'sv',
-        typeof partyToken === 'string' ? partyToken : null,
       )
       socket.join(room.code)
       const payload = { playerId, room: toPublicRoom(room, playerId) }
@@ -248,43 +181,11 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('redeemParty', ({ code: passCode }, ack) => {
-    const redeemed = redeemPassCode(String(passCode ?? ''))
-    if ('error' in redeemed) return ack?.({ error: redeemed.error })
-    ack?.({ token: redeemed.token, expiresAt: redeemed.expiresAt })
-  })
-
-  socket.on('activateParty', ({ code: passCode }, ack) => {
-    const binding = getBinding(socket.id)
-    if (!binding) return ack?.({ error: 'Inte ansluten till ett rum — skapa eller gå med först' })
-    const result = activatePartyPass(binding.code, binding.playerId, String(passCode ?? ''))
-    if ('error' in result) return ack?.({ error: result.error })
-    ack?.({
-      ok: true,
-      token: result.pass.token,
-      expiresAt: result.pass.expiresAt,
-      room: toPublicRoom(result.room, binding.playerId),
-    })
-    broadcastRoom(result.room.code)
-  })
-
-  socket.on('applyPartyToken', ({ token }, ack) => {
-    const binding = getBinding(socket.id)
-    if (!binding) return ack?.({ error: 'Inte ansluten' })
-    const result = applyPartyToken(binding.code, binding.playerId, String(token ?? ''))
-    if ('error' in result) return ack?.({ error: result.error })
-    ack?.({ ok: true })
-    broadcastRoom(result.code)
-  })
-
   socket.on('setPublicLobby', ({ isPublic }, ack) => {
     const binding = getBinding(socket.id)
     if (!binding) return ack?.({ error: 'Inte ansluten' })
     const result = setPublicLobby(binding.code, binding.playerId, Boolean(isPublic))
-    if ('error' in result) {
-      if (Boolean(isPublic)) trackFunnel('public_requires_party', binding.code)
-      return ack?.({ error: result.error })
-    }
+    if ('error' in result) return ack?.({ error: result.error })
     ack?.({ ok: true })
     broadcastRoom(result.code)
   })
@@ -450,13 +351,10 @@ async function boot() {
   })
 
   httpServer.listen(PORT, () => {
-    const diag = stripeEnvDiagnostics()
     const pdiag = persistDiagnostics()
     console.log(`Sabotext API on :${PORT}`)
     console.log(`Allowed origins: ${allowedOrigins.join(', ')}`)
-    console.log(
-      `Stripe: ${diag.configured ? `ok (${diag.keyPrefix})` : 'missing'} | envPresent=${JSON.stringify(diag.envPresent)}`,
-    )
+    console.log('Billing: free (no Stripe)')
     console.log(
       `Persist: ${pdiag.configured ? pdiag.backend : 'memory only'}${pdiag.hint ? ` | ${pdiag.hint}` : ''}`,
     )

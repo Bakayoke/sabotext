@@ -17,13 +17,6 @@ export type MatchHighlight = {
   votes: number
 }
 
-export type PartyPlan = 'day' | 'week'
-
-export type PartyPassLocal = {
-  token: string
-  expiresAt: number
-}
-
 export type Player = {
   id: string
   name: string

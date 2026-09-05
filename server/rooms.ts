@@ -3,8 +3,6 @@ import { localize, pickPrompts } from './prompts.js'
 import { trackFunnel } from './metrics.js'
 import {
   limitsFor,
-  lookupPass,
-  redeemPassCode,
   tierFromExpiry,
 } from './premium.js'
 import type {
@@ -89,11 +87,9 @@ export function createRoom(
   socketId: string,
   hostPlays = true,
   language: Lang = 'sv',
-  partyToken?: string | null,
+  _partyToken?: string | null,
 ): { room: Room; playerId: string } {
-  const pass = lookupPass(partyToken)
-  const premiumExpiresAt = pass?.expiresAt ?? null
-  const limits = limitsFor(tierFromExpiry(premiumExpiresAt))
+  const limits = limitsFor()
   const count = clampRounds(roundCount, limits.roundCounts)
 
   const code = uniqueCode()
@@ -128,7 +124,7 @@ export function createRoom(
     endsAt: 0,
     lastRound: null,
     highlights: [],
-    premiumExpiresAt,
+    premiumExpiresAt: null,
     isPublic: false,
     waitlist: [],
     updatedAt: Date.now(),
@@ -187,13 +183,9 @@ export function joinRoom(
     trackFunnel('waitlist_join', room.code)
     return {
       error:
-        maxPlayers <= 5
-          ? room.language === 'en'
-            ? `Room is full (max ${maxPlayers} free). Unlock Party for more players.`
-            : `Rummet är fullt (max ${maxPlayers} gratis). Lås upp Party för fler spelare.`
-          : room.language === 'en'
-            ? `Room is full (max ${maxPlayers})`
-            : `Rummet är fullt (max ${maxPlayers})`,
+        room.language === 'en'
+          ? `Room is full (max ${maxPlayers})`
+          : `Rummet är fullt (max ${maxPlayers})`,
       code: 'ROOM_FULL',
       roomCode: room.code,
       waitlistCount: room.waitlist.length,
@@ -286,10 +278,7 @@ export function setRoundCount(code: string, playerId: string, count: number): Ro
   const allowed = roomLimits(room).roundCounts
   if (!allowed.includes(count)) {
     return {
-      error:
-        room.language === 'en'
-          ? 'Invalid round count (Party required for 20/25)'
-          : 'Ogiltigt antal rundor (Party krävs för 20/25)',
+      error: room.language === 'en' ? 'Invalid round count' : 'Ogiltigt antal rundor',
     }
   }
   room.roundCount = count
@@ -307,62 +296,6 @@ export function setPublicLobby(
   if (room.hostId !== playerId) return { error: 'Bara värden kan ändra detta' }
   if (room.status !== 'lobby') return { error: 'Spelet har redan startat' }
   room.isPublic = Boolean(isPublic)
-  touch(room)
-  return room
-}
-
-export function unlockRoomWithPass(
-  code: string,
-  token: string,
-): Room | { error: string } {
-  const room = rooms.get(code.toUpperCase().trim())
-  if (!room) return { error: 'Rummet finns inte' }
-  const pass = lookupPass(token)
-  if (!pass) return { error: 'Party-passet är ogiltigt eller har gått ut' }
-  room.premiumExpiresAt = pass.expiresAt
-  // Keep waitlist names so host sees who to ping — they can join freely now
-  touch(room)
-  return room
-}
-
-export function activatePartyPass(
-  code: string,
-  playerId: string,
-  passCode: string,
-): { room: Room; pass: { token: string; expiresAt: number } } | { error: string } {
-  const room = rooms.get(code)
-  if (!room) return { error: 'Rummet finns inte' }
-  if (room.hostId !== playerId) return { error: 'Bara värden kan aktivera Party' }
-  if (room.status !== 'lobby') return { error: 'Spelet har redan startat' }
-
-  const redeemed = redeemPassCode(passCode)
-  if ('error' in redeemed) return redeemed
-
-  room.premiumExpiresAt = redeemed.expiresAt
-  const limits = roomLimits(room)
-  if (!limits.roundCounts.includes(room.roundCount)) {
-    room.roundCount = limits.roundCounts[0] ?? 6
-  }
-  touch(room)
-  return { room, pass: { token: redeemed.token, expiresAt: redeemed.expiresAt } }
-}
-
-export function applyPartyToken(
-  code: string,
-  playerId: string,
-  token: string,
-): Room | { error: string } {
-  const room = rooms.get(code)
-  if (!room) return { error: 'Rummet finns inte' }
-  if (room.hostId !== playerId) return { error: 'Bara värden kan aktivera Party' }
-  if (room.status !== 'lobby') return { error: 'Spelet har redan startat' }
-  const pass = lookupPass(token)
-  if (!pass) return { error: 'Party-passet är ogiltigt eller har gått ut' }
-  room.premiumExpiresAt = pass.expiresAt
-  const limits = roomLimits(room)
-  if (!limits.roundCounts.includes(room.roundCount)) {
-    room.roundCount = limits.roundCounts[0] ?? 6
-  }
   touch(room)
   return room
 }
@@ -404,7 +337,7 @@ export function listPublicLobbies(opts?: {
       maxPlayers: max,
       seatsLeft: max > 0 ? max - count : null,
       roundCount: room.roundCount,
-      party: tierFromExpiry(room.premiumExpiresAt) === 'party',
+      party: true,
     })
   }
 
@@ -468,22 +401,6 @@ export function startGame(code: string, playerId: string): Room | { error: strin
   if (!room) return { error: 'Rummet finns inte' }
   if (room.hostId !== playerId) return { error: 'Bara värden kan starta' }
   if (room.status !== 'lobby') return { error: 'Spelet har redan startat' }
-
-  if (room.premiumExpiresAt && room.premiumExpiresAt <= Date.now()) {
-    room.premiumExpiresAt = null
-    room.isPublic = false
-    room.roundCount = clampRounds(room.roundCount, roomLimits(room).roundCounts)
-  }
-
-  const waitlist = room.waitlist ?? []
-  if (waitlist.length > 0 && tierFromExpiry(room.premiumExpiresAt) !== 'party') {
-    return {
-      error:
-        room.language === 'en'
-          ? `Don't start yet — ${waitlist.length} waiting. Unlock Party first.`
-          : `Starta inte än — ${waitlist.length} vill in. Lås upp Party först.`,
-    }
-  }
 
   const players = playingPlayers(room).filter((p) => p.connected)
   if (players.length < 2) {

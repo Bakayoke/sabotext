@@ -98,7 +98,7 @@ const sv = {
   hideCode: 'Dölj kod',
   stripeMissing:
     'Fel nyckel i Railway: du har pk_… (Publishable). Byt till sk_… (Secret key) från Stripe → API keys.',
-  freeTierOk: 'Gratis: upp till 5 spelare (host + 4). Party: fler spelare.',
+  freeTierOk: 'Helt gratis — obegränsat antal spelare och alla rundor.',
   priceAnchorDay: '39 kr ≈ en läsk — hela gänget hela kvällen.',
   priceAnchorWeek: '99 kr / 7 dagar ≈ 14 kr per kväll.',
   firstPartyDeal: 'Första gången: −30%',
@@ -294,7 +294,7 @@ const en: typeof sv = {
   hideCode: 'Hide code',
   stripeMissing:
     'Wrong key in Railway: you have pk_… (Publishable). Switch to sk_… (Secret key) from Stripe → API keys.',
-  freeTierOk: 'Free: up to 5 players (host + 4). Party: more players.',
+  freeTierOk: 'Completely free — unlimited players and all round options.',
   priceAnchorDay: '39 kr ≈ a soda — the whole crew all night.',
   priceAnchorWeek: '99 kr / 7 days ≈ 14 kr per night.',
   firstPartyDeal: 'First time: −30%',
