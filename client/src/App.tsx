@@ -40,6 +40,7 @@ const FACTOPIA_URL = 'https://factopia.net'
 const PARTY_PATHS_URL = 'https://partypaths.com'
 const SCOURGEBORN_URL = 'https://scourgeborn.com'
 const YOUR_TASK_IS_URL = 'https://yourtaskis.com'
+const KLOTTERKAOS_URL = 'https://klotterkaos.com'
 
 function joinUrl(code: string) {
   const url = new URL(window.location.origin)
@@ -76,6 +77,11 @@ function SisterLinks({
         <strong>Your Task Is</strong>
         <span>{s.yourTaskIsPitch}</span>
         <em>{s.yourTaskIsCta}</em>
+      </a>
+      <a className={cls} href={KLOTTERKAOS_URL} target="_blank" rel="noreferrer">
+        <strong>Klotterkaos</strong>
+        <span>{s.klotterkaosPitch}</span>
+        <em>{s.klotterkaosCta}</em>
       </a>
     </div>
   )
