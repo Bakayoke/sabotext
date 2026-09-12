@@ -1592,6 +1592,38 @@ button {
   }
 }
 
+/* —— Signature rounds —— */
+.round-mode-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.85rem;
+  font-weight: 800;
+  font-size: 0.95rem;
+  text-align: center;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+}
+
+.round-mode-banner.finale {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #f59e0b 22%, var(--surface)),
+    color-mix(in srgb, #ea580c 16%, var(--surface))
+  );
+  border-color: color-mix(in srgb, #f59e0b 45%, transparent);
+  color: #92400e;
+}
+
+.round-mode-banner.wouldSend {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--brand) 18%, var(--surface)),
+    color-mix(in srgb, #0ea5e9 12%, var(--surface))
+  );
+  border-color: color-mix(in srgb, var(--brand) 40%, transparent);
+  color: var(--brand-deep);
+}
+
 /* —— Viral share —— */
 .share-nudge {
   margin: 0.5rem 0;
@@ -1603,11 +1635,34 @@ button {
   font-size: 0.92rem;
 }
 
+.reveal-share {
+  margin: 0.75rem 0 1rem;
+}
+
+.reveal-share .share-nudge {
+  margin-bottom: 0.55rem;
+  animation: share-pulse 1.6s ease-in-out 2;
+}
+
+@keyframes share-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
 .viral-share {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 0.5rem;
   margin: 0.75rem 0 1rem;
+}
+
+.reveal-share .viral-share {
+  margin: 0;
 }
 
 @media (max-width: 420px) {
@@ -1757,15 +1812,21 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  padding: 0.85rem 1rem;
   border-radius: 1rem;
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--accent) 20%, var(--surface)),
+    color-mix(in srgb, var(--brand) 10%, var(--surface))
+  );
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .gang-banner strong {
   display: block;
-  font-size: 0.92rem;
+  font-size: 0.95rem;
+  font-family: var(--font-display);
 }
 
 .gang-code {

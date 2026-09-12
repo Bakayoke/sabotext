@@ -12,6 +12,7 @@ import type {
   PublicRoom,
   Room,
   RoomStatus,
+  RoundMode,
   RoundResult,
   Submission,
 } from './types.js'
@@ -21,7 +22,10 @@ const makeCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ', 4)
 export const WRITE_MS = 0
 export const SABOTAGE_MS = 0
 export const VOTE_MS = 0
-export const REVEAL_MS = 8_000
+/** Longer reveal so players can share the winning sabotage */
+export const REVEAL_MS = 12_000
+export const POINTS_PER_VOTE = 100
+export const FINALE_POINTS_PER_VOTE = 150
 
 const DISCONNECT_GRACE_MS = 60_000
 const HOST_TRANSFER_AFTER_MS = 90_000
@@ -112,6 +116,7 @@ export function createRoom(
     status: 'lobby',
     usedPromptIds: [],
     currentRound: 0,
+    roundMode: 'normal',
     writerId: null,
     prompt: null,
     writerOrder: [],
@@ -248,6 +253,8 @@ export function hydrateRooms(list: Room[]) {
       voteOrder: Array.isArray(raw.voteOrder) ? raw.voteOrder : [],
       usedPromptIds: Array.isArray(raw.usedPromptIds) ? raw.usedPromptIds : [],
       writerOrder: Array.isArray(raw.writerOrder) ? raw.writerOrder : [],
+      roundMode:
+        raw.roundMode === 'wouldSend' || raw.roundMode === 'finale' ? raw.roundMode : 'normal',
       premiumExpiresAt: raw.premiumExpiresAt ?? null,
       players: (raw.players ?? []).map((p) => ({ ...p, connected: false })),
       status,
@@ -462,6 +469,12 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
+function pickRoundMode(currentRound: number, totalRounds: number): RoundMode {
+  if (currentRound >= totalRounds && totalRounds >= 2) return 'finale'
+  if (totalRounds >= 4 && currentRound === Math.ceil(totalRounds / 2)) return 'wouldSend'
+  return 'normal'
+}
+
 function beginRound(room: Room) {
   room.currentRound += 1
   if (room.currentRound > room.roundCount) {
@@ -474,6 +487,7 @@ function beginRound(room: Room) {
     room.sabotageTargets = {}
     room.voteOrder = []
     room.votes = {}
+    room.roundMode = 'normal'
     trackFunnel('game_finished', room.code)
     return
   }
@@ -489,6 +503,7 @@ function beginRound(room: Room) {
   room.writerOrder = shuffle(connectedPlaying.map((p) => p.id))
   room.writerIndex = 0
   room.writerId = null
+  room.roundMode = pickRoundMode(room.currentRound, room.roundCount)
 
   const exclude = new Set(room.usedPromptIds)
   const [prompt] = pickPrompts(1, room.language, exclude)
@@ -694,8 +709,6 @@ function pushHighlight(room: Room, winner: RoundResult) {
     .slice(0, 5)
 }
 
-const POINTS_PER_VOTE = 100
-
 export function resolveVote(room: Room) {
   if (room.status !== 'vote') return
 
@@ -711,6 +724,8 @@ export function resolveVote(room: Room) {
   )
 
   const topVotes = ranked.length ? (tally.get(ranked[0]!.id) ?? 0) : 0
+  const pointsPerVote =
+    room.roundMode === 'finale' ? FINALE_POINTS_PER_VOTE : POINTS_PER_VOTE
 
   const results: RoundResult[] = []
   ranked.forEach((s) => {
@@ -722,7 +737,7 @@ export function resolveVote(room: Room) {
       ? room.submissions.find((o) => o.authorId === s.targetAuthorId && o.isOriginal)
       : undefined
     const votes = tally.get(s.id) ?? 0
-    const gained = votes * POINTS_PER_VOTE
+    const gained = votes * pointsPerVote
     if (author && gained) author.score += gained
     results.push({
       submissionId: s.id,
@@ -926,6 +941,7 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
     status: room.status,
     currentRound: room.currentRound,
     totalRounds: room.roundCount,
+    roundMode: room.roundMode ?? 'normal',
     writerId: null,
     writerName: null,
     youAreWriter: false,

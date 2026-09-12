@@ -57,6 +57,7 @@ export type PublicRoom = {
   status: RoomStatus
   currentRound: number
   totalRounds: number
+  roundMode?: 'normal' | 'wouldSend' | 'finale'
   writerId: string | null
   writerName: string | null
   youAreWriter: boolean

@@ -4,6 +4,8 @@ export type Localized = { sv: string; en: string }
 
 export type RoomStatus = 'lobby' | 'write' | 'sabotage' | 'vote' | 'reveal' | 'finished'
 
+export type RoundMode = 'normal' | 'wouldSend' | 'finale'
+
 export type Player = {
   id: string
   name: string
@@ -68,6 +70,8 @@ export type Room = {
   /** Prompt ids used this match (avoid repeats) */
   usedPromptIds: string[]
   currentRound: number
+  /** Special round flavour for UI + scoring */
+  roundMode: RoundMode
   writerId: string | null
   prompt: Prompt | null
   /** Writer order for this match */
@@ -113,6 +117,7 @@ export type PublicRoom = {
   status: RoomStatus
   currentRound: number
   totalRounds: number
+  roundMode: 'normal' | 'wouldSend' | 'finale'
   writerId: string | null
   writerName: string | null
   youAreWriter: boolean

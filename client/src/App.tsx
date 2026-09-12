@@ -746,6 +746,18 @@ function Lobby({
   const waitlist = room.waitlist ?? []
   const roundOptions = room.limits?.roundCounts ?? ROUND_OPTIONS
 
+  useEffect(() => {
+    if (!isHost || tvMode) return
+    playLobbyChime()
+    setShowQr(true)
+  }, [isHost, tvMode, room.code])
+
+  useEffect(() => {
+    if (!canStart || !showQr) return
+    const timer = window.setTimeout(() => setShowQr(false), 2200)
+    return () => window.clearTimeout(timer)
+  }, [canStart, showQr])
+
   async function copy(text: string = inviteUrl) {
     try {
       await navigator.clipboard.writeText(text)
@@ -1035,6 +1047,41 @@ function PromptCard({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) 
   )
 }
 
+function RoundModeBanner({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
+  const mode = room.roundMode ?? 'normal'
+  if (mode === 'normal') return null
+  return (
+    <p className={`round-mode-banner ${mode}`}>
+      {mode === 'finale' ? s.roundFinale : s.roundWouldSend}
+    </p>
+  )
+}
+
+function playLobbyChime() {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    if (!Ctx) return
+    const ctx = new Ctx()
+    const now = ctx.currentTime
+    for (const [i, freq] of [523.25, 659.25, 783.99].entries()) {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      gain.gain.setValueAtTime(0.0001, now)
+      gain.gain.exponentialRampToValueAtTime(0.08, now + 0.02 + i * 0.08)
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35 + i * 0.08)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(now + i * 0.08)
+      osc.stop(now + 0.4 + i * 0.08)
+    }
+    setTimeout(() => void ctx.close(), 800)
+  } catch {
+    // ignore
+  }
+}
+
 function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
   const [text, setText] = useState(room.yourWrite ?? '')
   const [err, setErr] = useState<string | null>(null)
@@ -1048,6 +1095,7 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
   if (room.youAreSpectator || tvMode) {
     return (
       <section className="phase wait">
+        <RoundModeBanner room={room} s={s} />
         <PromptCard room={room} s={s} />
         <div className="pulse-dot" />
         <h2>{s.waitingWriter}</h2>
@@ -1061,6 +1109,7 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
   if (done) {
     return (
       <section className="phase wait">
+        <RoundModeBanner room={room} s={s} />
         <PromptCard room={room} s={s} />
         <p className="ok">{s.submitted}</p>
         <h2>{s.waitingWriter}</h2>
@@ -1074,6 +1123,7 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
   return (
     <section className="phase">
       <h2>{s.youWrite}</h2>
+      <RoundModeBanner room={room} s={s} />
       <p className="muted">{s.writeHint}</p>
       <PromptCard room={room} s={s} />
       <div className="sms">
@@ -1119,6 +1169,7 @@ function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<ty
   if (room.youAreSpectator || tvMode) {
     return (
       <section className="phase wait">
+        <RoundModeBanner room={room} s={s} />
         <PromptCard room={room} s={s} />
         <div className="pulse-dot" />
         <h2>{s.waitingSabotage}</h2>
@@ -1132,6 +1183,7 @@ function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<ty
   if (done) {
     return (
       <section className="phase wait">
+        <RoundModeBanner room={room} s={s} />
         <PromptCard room={room} s={s} />
         <p className="ok">{s.submitted}</p>
         <h2>{s.waitingSabotage}</h2>
@@ -1145,6 +1197,7 @@ function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<ty
   return (
     <section className="phase">
       <h2>{s.sabotageTitle}</h2>
+      <RoundModeBanner room={room} s={s} />
       <p className="muted">
         {room.sabotageTargetName
           ? s.sabotageOf.replace('{name}', room.sabotageTargetName)
@@ -1189,11 +1242,19 @@ function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<ty
 function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof t>; tvMode?: boolean }) {
   const [err, setErr] = useState<string | null>(null)
   const waiting = (room.votedCount ?? 0) < (room.voterCount ?? 0)
+  const voteTitle = room.roundMode === 'wouldSend' ? s.voteTitleWouldSend : s.voteTitle
+  const voteHint =
+    room.roundMode === 'wouldSend'
+      ? s.voteHintWouldSend
+      : room.roundMode === 'finale'
+        ? s.voteHintFinale
+        : s.voteHint
 
   return (
     <section className="phase">
-      <h2>{s.voteTitle}</h2>
-      {!tvMode && <p className="muted">{s.voteHint}</p>}
+      <h2>{voteTitle}</h2>
+      <RoundModeBanner room={room} s={s} />
+      {!tvMode && <p className="muted">{voteHint}</p>}
       <PromptCard room={room} s={s} />
       <div className="vote-grid">
         {room.submissions.map((sub) => {
@@ -1240,14 +1301,74 @@ function RevealPhase({
   const topVotes = results[0]?.votes ?? 0
   const tops = results.filter((r) => r.votes > 0 && r.votes === topVotes)
   const tiedTop = tops.length > 1
+  const [shareFlash, setShareFlash] = useState('')
+  const invite = joinUrl(room.code)
+  const star = tops[0]
 
   useEffect(() => {
     navigator.vibrate?.([40, 30, 60])
   }, [])
 
+  async function shareRoundMeme() {
+    if (!star || !room.prompt) return
+    const blob = await renderResultsImage({
+      title: `${s.winningSabotage}: ${star.authorName}`,
+      subtitle: `+${star.gained} ${s.points}`,
+      rows: [],
+      meme: {
+        task: room.prompt.task,
+        original: star.originalText || room.prompt.task,
+        sabotage: star.text,
+        author: star.authorName,
+      },
+      footer: invite,
+      cta: s.shareImageCta,
+    })
+    if (!blob) return
+    void trackMetric('share_results', `round:${room.code}`)
+    const file = new File([blob], 'sabotext-runda.png', { type: 'image/png' })
+    const text = s.roundShareText
+      .replace('{sabotage}', star.text)
+      .replace('{invite}', invite)
+    try {
+      if (typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Sabotext', text })
+        setShareFlash(s.resultsCopied)
+        setTimeout(() => setShareFlash(''), 2000)
+        return
+      }
+    } catch {
+      // fall through
+    }
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'sabotext-runda.png'
+    a.click()
+    URL.revokeObjectURL(url)
+    setShareFlash(s.resultsCopied)
+    setTimeout(() => setShareFlash(''), 2000)
+  }
+
+  async function copyRoundText() {
+    if (!star) return
+    const text = s.roundShareText
+      .replace('{sabotage}', star.text)
+      .replace('{invite}', invite)
+    try {
+      await navigator.clipboard.writeText(text)
+      void trackMetric('share_results', `roundtext:${room.code}`)
+      setShareFlash(s.resultsCopied)
+      setTimeout(() => setShareFlash(''), 2000)
+    } catch {
+      // ignore
+    }
+  }
+
   return (
     <section className="phase">
       <h2>{s.revealTitle}</h2>
+      <RoundModeBanner room={room} s={s} />
       <PromptCard room={room} s={s} />
       {tiedTop && <p className="tie-banner">{s.tieRound}</p>}
       {tops.map((winner) => (
@@ -1261,6 +1382,19 @@ function RevealPhase({
           </em>
         </div>
       ))}
+      {star && (
+        <div className="reveal-share hide-on-tv">
+          <p className="share-nudge">{s.shareRoundHint}</p>
+          <div className="viral-share">
+            <button type="button" className="btn accent" onClick={() => void shareRoundMeme()}>
+              {shareFlash || s.shareMeme}
+            </button>
+            <button type="button" className="btn secondary" onClick={() => void copyRoundText()}>
+              {s.copyRound}
+            </button>
+          </div>
+        </div>
+      )}
       <ul className="results">
         {results.map((r) => (
           <li key={r.submissionId} className={tops.some((t) => t.submissionId === r.submissionId) ? 'top' : undefined}>
