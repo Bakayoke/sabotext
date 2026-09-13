@@ -41,6 +41,7 @@ const PARTY_PATHS_URL = 'https://partypaths.com'
 const SCOURGEBORN_URL = 'https://scourgeborn.com'
 const YOUR_TASK_IS_URL = 'https://yourtaskis.com'
 const KLOTTERKAOS_URL = 'https://klotterkaos.com'
+const KLUDDKRIG_URL = 'https://kluddkrig.com'
 
 function joinUrl(code: string) {
   const url = new URL(window.location.origin)
@@ -82,6 +83,11 @@ function SisterLinks({
         <strong>Klotterkaos</strong>
         <span>{s.klotterkaosPitch}</span>
         <em>{s.klotterkaosCta}</em>
+      </a>
+      <a className={cls} href={KLUDDKRIG_URL} target="_blank" rel="noreferrer">
+        <strong>Kluddkrig</strong>
+        <span>{s.kluddkrigPitch}</span>
+        <em>{s.kluddkrigCta}</em>
       </a>
     </div>
   )
