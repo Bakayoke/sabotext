@@ -1056,11 +1056,9 @@ function PromptCard({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) 
 function RoundModeBanner({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
   const mode = room.roundMode ?? 'normal'
   if (mode === 'normal') return null
-  return (
-    <p className={`round-mode-banner ${mode}`}>
-      {mode === 'finale' ? s.roundFinale : s.roundWouldSend}
-    </p>
-  )
+  const label =
+    mode === 'finale' ? s.roundFinale : mode === 'wouldSend' ? s.roundWouldSend : s.roundDouble
+  return <p className={`round-mode-banner ${mode}`}>{label}</p>
 }
 
 function playLobbyChime() {
@@ -1166,19 +1164,20 @@ function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<ty
   const [err, setErr] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const done = Boolean(room.yourSabotage)
+  const skipSabotage = Boolean(room.youSkipSabotage)
 
   useEffect(() => {
     if (room.yourSabotage) setText(room.yourSabotage)
     else if (room.originalText) setText((prev) => prev || room.originalText || '')
   }, [room.yourSabotage, room.originalText])
 
-  if (room.youAreSpectator || tvMode) {
+  if (room.youAreSpectator || tvMode || skipSabotage) {
     return (
       <section className="phase wait">
         <RoundModeBanner room={room} s={s} />
         <PromptCard room={room} s={s} />
         <div className="pulse-dot" />
-        <h2>{s.waitingSabotage}</h2>
+        <h2>{skipSabotage && !tvMode ? s.waitingDoubleVictim : s.waitingSabotage}</h2>
         <p className="muted">
           {room.sabotageCount}/{room.sabotageNeeded}
         </p>
@@ -1294,6 +1293,28 @@ function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof
   )
 }
 
+function useRevealBeat(endsAt: number, phaseSeconds: number) {
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    const total = Math.max(phaseSeconds, 1) * 1000
+    const tick = () => {
+      const rem = Math.max(0, endsAt - Date.now())
+      setElapsed(Math.max(0, total - rem))
+    }
+    tick()
+    const id = window.setInterval(tick, 100)
+    return () => window.clearInterval(id)
+  }, [endsAt, phaseSeconds])
+
+  if (!endsAt || phaseSeconds <= 0) return 'full' as const
+  if (elapsed < 2500) return 'original' as const
+  if (elapsed < 5500) return 'sabotage' as const
+  if (elapsed < 8500) return 'votes' as const
+  if (elapsed < 11500) return 'winner' as const
+  return 'full' as const
+}
+
 function RevealPhase({
   room,
   s,
@@ -1310,10 +1331,31 @@ function RevealPhase({
   const [shareFlash, setShareFlash] = useState('')
   const invite = joinUrl(room.code)
   const star = tops[0]
+  const beat = useRevealBeat(room.endsAt, room.phaseSeconds)
+  const showDrama = Boolean(star) && beat !== 'full'
+  const [displayVotes, setDisplayVotes] = useState(0)
 
   useEffect(() => {
     navigator.vibrate?.([40, 30, 60])
   }, [])
+
+  useEffect(() => {
+    if (beat !== 'votes' || !star) {
+      setDisplayVotes(beat === 'original' || beat === 'sabotage' ? 0 : star?.votes ?? 0)
+      return
+    }
+    setDisplayVotes(0)
+    const target = star.votes
+    if (target <= 0) return
+    const step = Math.max(1, Math.ceil(target / 12))
+    let current = 0
+    const id = window.setInterval(() => {
+      current = Math.min(target, current + step)
+      setDisplayVotes(current)
+      if (current >= target) window.clearInterval(id)
+    }, 80)
+    return () => window.clearInterval(id)
+  }, [beat, star?.submissionId, star?.votes])
 
   async function shareRoundMeme() {
     if (!star || !room.prompt) return
@@ -1369,6 +1411,41 @@ function RevealPhase({
     } catch {
       // ignore
     }
+  }
+
+  if (showDrama && star) {
+    return (
+      <section className={`phase reveal-drama beat-${beat}`}>
+        <RoundModeBanner room={room} s={s} />
+        <PromptCard room={room} s={s} />
+        {(beat === 'original' || beat === 'sabotage' || beat === 'votes' || beat === 'winner') && (
+          <div className="drama-card original-card">
+            <span>{s.revealOriginal}</span>
+            <p>{star.originalText || room.prompt?.task || '…'}</p>
+          </div>
+        )}
+        {(beat === 'sabotage' || beat === 'votes' || beat === 'winner') && (
+          <div className="drama-card sabotage-card pop-in">
+            <span>{s.revealSabotage}</span>
+            <p>{star.text}</p>
+          </div>
+        )}
+        {(beat === 'votes' || beat === 'winner') && (
+          <p className="drama-votes pop-in">
+            {s.revealVotes}: <strong>{displayVotes}</strong>
+          </p>
+        )}
+        {beat === 'winner' && (
+          <div className="drama-card winner-card pop-in">
+            <span>{s.revealWinnerCue}</span>
+            <strong>{star.authorName}</strong>
+            <em>
+              +{star.gained} {s.points}
+            </em>
+          </div>
+        )}
+      </section>
+    )
   }
 
   return (
@@ -1625,6 +1702,37 @@ function Winner({
       )}
 
       <StandingsTable room={room} playerId={playerId} s={s} />
+
+      {room.matchStats && (
+        <section className="match-stats">
+          <h2>{s.matchStatsTitle}</h2>
+          <ul>
+            {room.matchStats.topRivalry && (
+              <li>
+                {s.rivalryStat
+                  .replace('{saboteur}', room.matchStats.topRivalry.saboteur)
+                  .replace('{victim}', room.matchStats.topRivalry.victim)
+                  .replace('{count}', String(room.matchStats.topRivalry.count))}
+              </li>
+            )}
+            {room.matchStats.mostVoted && (
+              <li>
+                {s.mostVotedStat
+                  .replace('{name}', room.matchStats.mostVoted.name)
+                  .replace('{votes}', String(room.matchStats.mostVoted.votes))}
+              </li>
+            )}
+            {room.matchStats.clutch && (
+              <li>
+                {s.clutchStat
+                  .replace('{name}', room.matchStats.clutch.name)
+                  .replace('{gained}', String(room.matchStats.clutch.gained))}
+                <p className="muted clutch-quote">“{room.matchStats.clutch.text}”</p>
+              </li>
+            )}
+          </ul>
+        </section>
+      )}
 
       {showShareNudge && !tvMode && (
         <p className="share-nudge">{s.shareViralHint}</p>

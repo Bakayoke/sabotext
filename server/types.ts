@@ -4,7 +4,7 @@ export type Localized = { sv: string; en: string }
 
 export type RoomStatus = 'lobby' | 'write' | 'sabotage' | 'vote' | 'reveal' | 'finished'
 
-export type RoundMode = 'normal' | 'wouldSend' | 'finale'
+export type RoundMode = 'normal' | 'wouldSend' | 'doubleSabotage' | 'finale'
 
 export type Player = {
   id: string
@@ -51,6 +51,13 @@ export type MatchHighlight = {
   votes: number
 }
 
+/** End-of-match brag stats for rematch fuel */
+export type MatchStats = {
+  topRivalry: { saboteur: string; victim: string; count: number } | null
+  mostVoted: { name: string; votes: number } | null
+  clutch: { name: string; gained: number; text: string } | null
+}
+
 export type PremiumTier = 'free' | 'party'
 
 export type PremiumLimits = {
@@ -89,6 +96,12 @@ export type Room = {
   lastRound: RoundResult[] | null
   /** Top sabotages of the match (kept top 5 by votes) */
   highlights: MatchHighlight[]
+  /** saboteurId → targetId → times assigned this match */
+  rivalryHits: Record<string, Record<string, number>>
+  /** playerId → total votes received on their sabotages */
+  votesReceived: Record<string, number>
+  /** Biggest single-round point haul */
+  clutchBest: { playerId: string; gained: number; text: string } | null
   premiumExpiresAt: number | null
   /** Listed on Find game / open lobbies */
   isPublic: boolean
@@ -117,11 +130,13 @@ export type PublicRoom = {
   status: RoomStatus
   currentRound: number
   totalRounds: number
-  roundMode: 'normal' | 'wouldSend' | 'finale'
+  roundMode: 'normal' | 'wouldSend' | 'doubleSabotage' | 'finale'
   writerId: string | null
   writerName: string | null
   youAreWriter: boolean
   youAreSpectator: boolean
+  /** True when you have no sabotage assignment (e.g. double-sabotage victim) */
+  youSkipSabotage: boolean
   prompt: { recipient: string; task: string } | null
   originalText: string | null
   /** Whose SMS you are sabotaging */
@@ -147,4 +162,5 @@ export type PublicRoom = {
   isPublic: boolean
   waitlist: { id: string; name: string; at: number }[]
   highlights: MatchHighlight[]
+  matchStats: MatchStats | null
 }

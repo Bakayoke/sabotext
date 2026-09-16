@@ -8,6 +8,7 @@ import {
 import type {
   Lang,
   MatchHighlight,
+  MatchStats,
   Player,
   PublicRoom,
   Room,
@@ -22,8 +23,8 @@ const makeCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ', 4)
 export const WRITE_MS = 0
 export const SABOTAGE_MS = 0
 export const VOTE_MS = 0
-/** Longer reveal so players can share the winning sabotage */
-export const REVEAL_MS = 12_000
+/** Longer reveal for staged drama + share window */
+export const REVEAL_MS = 16_000
 export const POINTS_PER_VOTE = 100
 export const FINALE_POINTS_PER_VOTE = 150
 
@@ -129,6 +130,9 @@ export function createRoom(
     endsAt: 0,
     lastRound: null,
     highlights: [],
+    rivalryHits: {},
+    votesReceived: {},
+    clutchBest: null,
     premiumExpiresAt: null,
     isPublic: false,
     waitlist: [],
@@ -254,7 +258,16 @@ export function hydrateRooms(list: Room[]) {
       usedPromptIds: Array.isArray(raw.usedPromptIds) ? raw.usedPromptIds : [],
       writerOrder: Array.isArray(raw.writerOrder) ? raw.writerOrder : [],
       roundMode:
-        raw.roundMode === 'wouldSend' || raw.roundMode === 'finale' ? raw.roundMode : 'normal',
+        raw.roundMode === 'wouldSend' ||
+        raw.roundMode === 'doubleSabotage' ||
+        raw.roundMode === 'finale'
+          ? raw.roundMode
+          : 'normal',
+      rivalryHits:
+        raw.rivalryHits && typeof raw.rivalryHits === 'object' ? raw.rivalryHits : {},
+      votesReceived:
+        raw.votesReceived && typeof raw.votesReceived === 'object' ? raw.votesReceived : {},
+      clutchBest: raw.clutchBest ?? null,
       premiumExpiresAt: raw.premiumExpiresAt ?? null,
       players: (raw.players ?? []).map((p) => ({ ...p, connected: false })),
       status,
@@ -428,6 +441,9 @@ export function startGame(code: string, playerId: string): Room | { error: strin
   room.writerIndex = -1
   room.lastRound = null
   room.highlights = []
+  room.rivalryHits = {}
+  room.votesReceived = {}
+  room.clutchBest = null
   beginRound(room)
   touch(room)
   trackFunnel('game_start', code)
@@ -452,6 +468,9 @@ export function rematch(code: string, playerId: string): Room | { error: string 
   room.endsAt = 0
   room.lastRound = null
   room.highlights = []
+  room.rivalryHits = {}
+  room.votesReceived = {}
+  room.clutchBest = null
   room.players.forEach((p) => {
     p.score = 0
     if (p.id !== room.hostId) p.playing = true
@@ -469,10 +488,77 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
-function pickRoundMode(currentRound: number, totalRounds: number): RoundMode {
+function pickRoundMode(
+  currentRound: number,
+  totalRounds: number,
+  playerCount: number,
+): RoundMode {
   if (currentRound >= totalRounds && totalRounds >= 2) return 'finale'
   if (totalRounds >= 4 && currentRound === Math.ceil(totalRounds / 2)) return 'wouldSend'
+  if (
+    totalRounds >= 5 &&
+    playerCount >= 3 &&
+    currentRound === Math.max(2, Math.ceil(totalRounds / 3))
+  ) {
+    return 'doubleSabotage'
+  }
   return 'normal'
+}
+
+function trackRivalry(room: Room, saboteurId: string, targetId: string) {
+  if (!room.rivalryHits) room.rivalryHits = {}
+  if (!room.rivalryHits[saboteurId]) room.rivalryHits[saboteurId] = {}
+  const row = room.rivalryHits[saboteurId]!
+  row[targetId] = (row[targetId] ?? 0) + 1
+}
+
+function saboteurPlayers(room: Room) {
+  const needed = writers(room)
+  const assigned = Object.keys(room.sabotageTargets)
+  if (room.roundMode === 'doubleSabotage' && assigned.length > 0) {
+    return needed.filter((p) => assigned.includes(p.id))
+  }
+  return needed
+}
+
+function computeMatchStats(room: Room): MatchStats | null {
+  if (room.status !== 'finished') return null
+
+  let topRivalry: MatchStats['topRivalry'] = null
+  for (const [fromId, targets] of Object.entries(room.rivalryHits ?? {})) {
+    for (const [toId, count] of Object.entries(targets)) {
+      if (count < 2) continue
+      if (!topRivalry || count > topRivalry.count) {
+        const saboteur = room.players.find((p) => p.id === fromId)?.name
+        const victim = room.players.find((p) => p.id === toId)?.name
+        if (saboteur && victim) topRivalry = { saboteur, victim, count }
+      }
+    }
+  }
+
+  let mostVoted: MatchStats['mostVoted'] = null
+  for (const [playerId, votes] of Object.entries(room.votesReceived ?? {})) {
+    if (votes <= 0) continue
+    if (!mostVoted || votes > mostVoted.votes) {
+      const name = room.players.find((p) => p.id === playerId)?.name
+      if (name) mostVoted = { name, votes }
+    }
+  }
+
+  let clutch: MatchStats['clutch'] = null
+  if (room.clutchBest && room.clutchBest.gained > 0) {
+    const name = room.players.find((p) => p.id === room.clutchBest!.playerId)?.name
+    if (name) {
+      clutch = {
+        name,
+        gained: room.clutchBest.gained,
+        text: room.clutchBest.text,
+      }
+    }
+  }
+
+  if (!topRivalry && !mostVoted && !clutch) return null
+  return { topRivalry, mostVoted, clutch }
 }
 
 function beginRound(room: Room) {
@@ -503,7 +589,11 @@ function beginRound(room: Room) {
   room.writerOrder = shuffle(connectedPlaying.map((p) => p.id))
   room.writerIndex = 0
   room.writerId = null
-  room.roundMode = pickRoundMode(room.currentRound, room.roundCount)
+  room.roundMode = pickRoundMode(
+    room.currentRound,
+    room.roundCount,
+    connectedPlaying.length,
+  )
 
   const exclude = new Set(room.usedPromptIds)
   const [prompt] = pickPrompts(1, room.language, exclude)
@@ -570,13 +660,27 @@ export function submitOriginal(
 
 function enterSabotage(room: Room) {
   const needed = writers(room)
-  const order = shuffle(needed.map((p) => p.id))
   room.sabotageTargets = {}
-  for (let i = 0; i < order.length; i++) {
-    const saboteur = order[i]!
-    const target = order[(i + 1) % order.length]!
-    room.sabotageTargets[saboteur] = target
+
+  if (room.roundMode === 'doubleSabotage' && needed.length >= 3) {
+    const victim = needed[Math.floor(Math.random() * needed.length)]!
+    for (const p of needed) {
+      if (p.id === victim.id) continue
+      room.sabotageTargets[p.id] = victim.id
+      trackRivalry(room, p.id, victim.id)
+    }
+  } else {
+    // Fall back to normal circle if double sabotage isn't viable
+    if (room.roundMode === 'doubleSabotage') room.roundMode = 'normal'
+    const order = shuffle(needed.map((p) => p.id))
+    for (let i = 0; i < order.length; i++) {
+      const saboteur = order[i]!
+      const target = order[(i + 1) % order.length]!
+      room.sabotageTargets[saboteur] = target
+      trackRivalry(room, saboteur, target)
+    }
   }
+
   // Drop any leftover sabotages from a weird mid-round state
   room.submissions = room.submissions.filter((s) => s.isOriginal)
   room.votes = {}
@@ -636,7 +740,7 @@ export function submitSabotage(
     })
   }
 
-  const needed = writers(room)
+  const needed = saboteurPlayers(room)
   const done =
     needed.length > 0 &&
     needed.every((p) => room.submissions.some((s) => s.authorId === p.id && !s.isOriginal))
@@ -739,6 +843,13 @@ export function resolveVote(room: Room) {
     const votes = tally.get(s.id) ?? 0
     const gained = votes * pointsPerVote
     if (author && gained) author.score += gained
+    if (votes > 0) {
+      if (!room.votesReceived) room.votesReceived = {}
+      room.votesReceived[s.authorId] = (room.votesReceived[s.authorId] ?? 0) + votes
+    }
+    if (gained > 0 && (!room.clutchBest || gained > room.clutchBest.gained)) {
+      room.clutchBest = { playerId: s.authorId, gained, text: s.text }
+    }
     results.push({
       submissionId: s.id,
       authorId: s.authorId,
@@ -871,10 +982,11 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
     room.submissions.find((s) => s.authorId === viewerId && !s.isOriginal)?.text ?? null
 
   const neededPlayers = writers(room)
+  const saboteurs = saboteurPlayers(room)
   const writeDone = neededPlayers.filter((p) =>
     room.submissions.some((s) => s.authorId === p.id && s.isOriginal),
   ).length
-  const sabotageDone = neededPlayers.filter((p) =>
+  const sabotageDone = saboteurs.filter((p) =>
     room.submissions.some((s) => s.authorId === p.id && !s.isOriginal),
   ).length
 
@@ -885,6 +997,12 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
   const targetPlayer = targetAuthorId
     ? room.players.find((p) => p.id === targetAuthorId)
     : undefined
+  const youSkipSabotage =
+    room.status === 'sabotage' &&
+    Boolean(viewer?.playing) &&
+    !targetAuthorId
+
+  const anonymousVote = room.roundMode === 'finale'
 
   let submissions: PublicRoom['submissions'] = []
 
@@ -904,7 +1022,7 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
       return {
         id: s.id,
         text: s.text,
-        isYours: s.authorId === viewerId,
+        isYours: anonymousVote ? false : s.authorId === viewerId,
         isOriginal: false,
       }
     })
@@ -946,6 +1064,7 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
     writerName: null,
     youAreWriter: false,
     youAreSpectator,
+    youSkipSabotage,
     prompt: room.prompt
       ? {
           recipient: localize(room.prompt.recipient, lang),
@@ -961,7 +1080,7 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
     writeCount: writeDone,
     writeNeeded: neededPlayers.length,
     sabotageCount: sabotageDone,
-    sabotageNeeded: neededPlayers.length,
+    sabotageNeeded: saboteurs.length,
     submissions,
     yourVote: room.votes[viewerId] ?? null,
     votedCount: Object.keys(room.votes).length,
@@ -975,6 +1094,7 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
     isPublic: Boolean(room.isPublic),
     waitlist: room.waitlist ?? [],
     highlights: showHighlights ? room.highlights : [],
+    matchStats: computeMatchStats(room),
   }
 }
 

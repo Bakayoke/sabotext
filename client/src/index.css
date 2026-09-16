@@ -1624,6 +1624,137 @@ button {
   color: var(--brand-deep);
 }
 
+.round-mode-banner.doubleSabotage {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #ef4444 18%, var(--surface)),
+    color-mix(in srgb, #f97316 14%, var(--surface))
+  );
+  border-color: color-mix(in srgb, #ef4444 42%, transparent);
+  color: #9f1239;
+}
+
+/* —— Reveal drama —— */
+.reveal-drama {
+  text-align: center;
+  gap: 0.85rem;
+}
+
+.drama-card {
+  margin: 0 auto;
+  max-width: 28rem;
+  padding: 1rem 1.15rem;
+  border-radius: 1rem;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
+.drama-card span {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.drama-card p {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.35;
+}
+
+.drama-card.sabotage-card {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.drama-card.winner-card {
+  text-align: center;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #f59e0b 20%, var(--surface)),
+    color-mix(in srgb, var(--brand) 12%, var(--surface))
+  );
+  border-color: color-mix(in srgb, #f59e0b 50%, transparent);
+}
+
+.drama-card.winner-card strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  margin: 0.25rem 0;
+}
+
+.drama-card.winner-card em {
+  font-style: normal;
+  font-weight: 800;
+  color: var(--brand-deep);
+}
+
+.drama-votes {
+  font-size: 1.35rem;
+  font-weight: 800;
+  margin: 0.25rem 0;
+}
+
+.drama-votes strong {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  color: var(--brand-deep);
+}
+
+.pop-in {
+  animation: pop-in 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.match-stats {
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--brand) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, transparent);
+}
+
+.match-stats h2 {
+  margin: 0 0 0.55rem;
+  font-size: 1.05rem;
+}
+
+.match-stats ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.match-stats li {
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.clutch-quote {
+  margin: 0.25rem 0 0;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
 /* —— Viral share —— */
 .share-nudge {
   margin: 0.5rem 0;

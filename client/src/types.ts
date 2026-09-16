@@ -17,6 +17,12 @@ export type MatchHighlight = {
   votes: number
 }
 
+export type MatchStats = {
+  topRivalry: { saboteur: string; victim: string; count: number } | null
+  mostVoted: { name: string; votes: number } | null
+  clutch: { name: string; gained: number; text: string } | null
+}
+
 export type Player = {
   id: string
   name: string
@@ -57,11 +63,12 @@ export type PublicRoom = {
   status: RoomStatus
   currentRound: number
   totalRounds: number
-  roundMode?: 'normal' | 'wouldSend' | 'finale'
+  roundMode?: 'normal' | 'wouldSend' | 'doubleSabotage' | 'finale'
   writerId: string | null
   writerName: string | null
   youAreWriter: boolean
   youAreSpectator: boolean
+  youSkipSabotage?: boolean
   prompt: { recipient: string; task: string } | null
   originalText: string | null
   sabotageTargetName: string | null
@@ -84,4 +91,5 @@ export type PublicRoom = {
   isPublic: boolean
   waitlist: { id: string; name: string; at: number }[]
   highlights: MatchHighlight[]
+  matchStats?: MatchStats | null
 }
