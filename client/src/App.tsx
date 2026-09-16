@@ -42,6 +42,7 @@ const SCOURGEBORN_URL = 'https://scourgeborn.com'
 const YOUR_TASK_IS_URL = 'https://yourtaskis.com'
 const KLOTTERKAOS_URL = 'https://klotterkaos.com'
 const KLUDDKRIG_URL = 'https://kluddkrig.com'
+const PULSEKAOS_URL = 'https://pulsekaos.com'
 
 function joinUrl(code: string) {
   const url = new URL(window.location.origin)
@@ -88,6 +89,11 @@ function SisterLinks({
         <strong>Kluddkrig</strong>
         <span>{s.kluddkrigPitch}</span>
         <em>{s.kluddkrigCta}</em>
+      </a>
+      <a className={cls} href={PULSEKAOS_URL} target="_blank" rel="noreferrer">
+        <strong>Pulsekaos</strong>
+        <span>{s.pulsekaosPitch}</span>
+        <em>{s.pulsekaosCta}</em>
       </a>
     </div>
   )
