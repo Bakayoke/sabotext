@@ -1,5 +1,5 @@
 import { customAlphabet } from 'nanoid'
-import { localize, pickPrompts } from './prompts.js'
+import { localize, parsePromptPack, pickPrompts } from './prompts.js'
 import { trackFunnel } from './metrics.js'
 import {
   limitsFor,
@@ -10,6 +10,7 @@ import type {
   MatchHighlight,
   MatchStats,
   Player,
+  PromptPack,
   PublicRoom,
   Room,
   RoomStatus,
@@ -93,6 +94,7 @@ export function createRoom(
   hostPlays = true,
   language: Lang = 'sv',
   _partyToken?: string | null,
+  promptPack: PromptPack = 'mix',
 ): { room: Room; playerId: string } {
   const limits = limitsFor()
   const count = clampRounds(roundCount, limits.roundCounts)
@@ -114,12 +116,14 @@ export function createRoom(
     language: language === 'en' ? 'en' : 'sv',
     roundCount: count,
     hostPlays,
+    promptPack: parsePromptPack(promptPack),
     status: 'lobby',
     usedPromptIds: [],
     currentRound: 0,
     roundMode: 'normal',
     writerId: null,
     prompt: null,
+    promptIsPersonal: false,
     writerOrder: [],
     writerIndex: -1,
     originalText: '',
@@ -263,6 +267,8 @@ export function hydrateRooms(list: Room[]) {
         raw.roundMode === 'finale'
           ? raw.roundMode
           : 'normal',
+      promptPack: parsePromptPack(raw.promptPack),
+      promptIsPersonal: Boolean(raw.promptIsPersonal),
       rivalryHits:
         raw.rivalryHits && typeof raw.rivalryHits === 'object' ? raw.rivalryHits : {},
       votesReceived:
@@ -302,6 +308,20 @@ export function setRoundCount(code: string, playerId: string, count: number): Ro
     }
   }
   room.roundCount = count
+  touch(room)
+  return room
+}
+
+export function setPromptPack(
+  code: string,
+  playerId: string,
+  pack: PromptPack,
+): Room | { error: string } {
+  const room = rooms.get(code)
+  if (!room) return { error: 'Rummet finns inte' }
+  if (room.hostId !== playerId) return { error: 'Bara värden kan välja tema' }
+  if (room.status !== 'lobby') return { error: 'Spelet har redan startat' }
+  room.promptPack = parsePromptPack(pack)
   touch(room)
   return room
 }
@@ -574,6 +594,7 @@ function beginRound(room: Room) {
     room.voteOrder = []
     room.votes = {}
     room.roundMode = 'normal'
+    room.promptIsPersonal = false
     trackFunnel('game_finished', room.code)
     return
   }
@@ -596,9 +617,22 @@ function beginRound(room: Room) {
   )
 
   const exclude = new Set(room.usedPromptIds)
-  const [prompt] = pickPrompts(1, room.language, exclude)
+  const [picked] = pickPrompts(1, room.language, exclude, room.promptPack ?? 'mix')
+  let prompt = picked ?? null
+  room.promptIsPersonal = false
+
+  // ~40%: make the SMS recipient someone in the room
+  if (prompt && connectedPlaying.length >= 2 && Math.random() < 0.4) {
+    const star = connectedPlaying[Math.floor(Math.random() * connectedPlaying.length)]!
+    prompt = {
+      ...prompt,
+      recipient: { sv: star.name, en: star.name },
+    }
+    room.promptIsPersonal = true
+  }
+
   room.prompt = prompt
-  if (prompt) room.usedPromptIds.push(prompt.id)
+  if (picked) room.usedPromptIds.push(picked.id)
 
   room.originalText = ''
   room.submissions = []
@@ -1045,6 +1079,29 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
 
   const showHighlights = room.status === 'finished' || room.status === 'reveal'
 
+  let waitingNames: string[] = []
+  if (room.status === 'write') {
+    waitingNames = neededPlayers
+      .filter((p) => !room.submissions.some((s) => s.authorId === p.id && s.isOriginal))
+      .map((p) => p.name)
+  } else if (room.status === 'sabotage') {
+    waitingNames = saboteurs
+      .filter((p) => !room.submissions.some((s) => s.authorId === p.id && !s.isOriginal))
+      .map((p) => p.name)
+  } else if (room.status === 'vote') {
+    waitingNames = voteEligible(room)
+      .filter((p) => !room.votes[p.id])
+      .map((p) => p.name)
+  }
+
+  const saboteursOnYou =
+    room.status === 'sabotage'
+      ? Object.entries(room.sabotageTargets)
+          .filter(([, targetId]) => targetId === viewerId)
+          .map(([saboteurId]) => room.players.find((p) => p.id === saboteurId)?.name)
+          .filter((n): n is string => Boolean(n))
+      : []
+
   // Never surface phase timers to clients for write/vote (and clear stale endsAt)
   const endsAt =
     room.status === 'reveal' && room.endsAt > 0 ? room.endsAt : 0
@@ -1056,6 +1113,7 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
     language: lang,
     roundCount: room.roundCount,
     hostPlays: room.hostPlays,
+    promptPack: room.promptPack ?? 'mix',
     status: room.status,
     currentRound: room.currentRound,
     totalRounds: room.roundCount,
@@ -1071,10 +1129,13 @@ export function toPublicRoom(room: Room, viewerId: string): PublicRoom {
           task: localize(room.prompt.task, lang),
         }
       : null,
+    promptIsPersonal: Boolean(room.promptIsPersonal),
     originalText:
       room.status === 'sabotage' ? (targetOriginal?.text ?? null) : null,
     sabotageTargetName:
       room.status === 'sabotage' ? (targetPlayer?.name ?? null) : null,
+    waitingNames,
+    saboteursOnYou,
     yourWrite,
     yourSabotage,
     writeCount: writeDone,

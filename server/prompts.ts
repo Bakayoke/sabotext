@@ -1,4 +1,4 @@
-import type { Lang, Localized, Prompt } from './types.js'
+import type { Lang, Localized, Prompt, PromptPack } from './types.js'
 
 function L(sv: string, en: string): Localized {
   return { sv, en }
@@ -657,18 +657,49 @@ export const PROMPTS: Prompt[] = [
   },
 ]
 
-export function pickPrompts(count: number, lang: Lang, excludeIds: Set<string>): Prompt[] {
-  void lang
-  const theme = todaysTheme()
-  const unused = PROMPTS.filter((p) => !excludeIds.has(p.id))
-  const pool = unused.length > 0 ? unused : [...PROMPTS]
+const PACK_THEME_IDS: Record<Exclude<PromptPack, 'mix'>, string> = {
+  work: 'work',
+  dating: 'dating',
+  family: 'family',
+  chaos: 'absurd',
+}
 
-  // Prefer true randomness; lightly sprinkle at most one themed prompt if available
-  const themedUnused = shuffle(pool.filter((p) => theme.ids.includes(p.id)))
-  const rest = shuffle(pool.filter((p) => !theme.ids.includes(p.id)))
+export function parsePromptPack(raw: unknown): PromptPack {
+  if (raw === 'work' || raw === 'dating' || raw === 'family' || raw === 'chaos' || raw === 'mix') {
+    return raw
+  }
+  return 'mix'
+}
+
+function promptsForPack(pack: PromptPack): Prompt[] {
+  if (pack === 'mix') return PROMPTS
+  const themeId = PACK_THEME_IDS[pack]
+  const theme = DAY_THEMES.find((t) => t.id === themeId)
+  if (!theme) return PROMPTS
+  const set = new Set(theme.ids)
+  const filtered = PROMPTS.filter((p) => set.has(p.id))
+  return filtered.length >= 8 ? filtered : PROMPTS
+}
+
+export function pickPrompts(
+  count: number,
+  lang: Lang,
+  excludeIds: Set<string>,
+  pack: PromptPack = 'mix',
+): Prompt[] {
+  void lang
+  const catalog = promptsForPack(pack)
+  const theme = todaysTheme()
+  const unused = catalog.filter((p) => !excludeIds.has(p.id))
+  const pool = unused.length > 0 ? unused : [...catalog]
+
+  // Prefer true randomness; lightly sprinkle at most one themed prompt if available (mix only)
+  const themedUnused =
+    pack === 'mix' ? shuffle(pool.filter((p) => theme.ids.includes(p.id))) : []
+  const rest = shuffle(pool.filter((p) => !theme.ids.includes(p.id) || pack !== 'mix'))
   const out: Prompt[] = []
 
-  if (themedUnused.length > 0 && Math.random() < 0.28) {
+  if (pack === 'mix' && themedUnused.length > 0 && Math.random() < 0.28) {
     out.push(themedUnused[0]!)
   }
 
@@ -677,7 +708,13 @@ export function pickPrompts(count: number, lang: Lang, excludeIds: Set<string>):
     if (!out.some((x) => x.id === p.id)) out.push(p)
   }
 
-  // If pool exhausted mid-pick, fill from full catalog excluding already chosen
+  // If pool exhausted mid-pick, fill from pack catalog then full catalog
+  if (out.length < count) {
+    for (const p of shuffle(catalog)) {
+      if (out.length >= count) break
+      if (!out.some((x) => x.id === p.id)) out.push(p)
+    }
+  }
   if (out.length < count) {
     for (const p of shuffle(PROMPTS)) {
       if (out.length >= count) break

@@ -1,5 +1,7 @@
 export type Lang = 'sv' | 'en'
 
+export type PromptPack = 'mix' | 'work' | 'dating' | 'family' | 'chaos'
+
 export type PremiumTier = 'free' | 'party'
 
 export type PremiumLimits = {
@@ -60,6 +62,7 @@ export type PublicRoom = {
   language: Lang
   roundCount: number
   hostPlays: boolean
+  promptPack?: PromptPack
   status: RoomStatus
   currentRound: number
   totalRounds: number
@@ -70,8 +73,11 @@ export type PublicRoom = {
   youAreSpectator: boolean
   youSkipSabotage?: boolean
   prompt: { recipient: string; task: string } | null
+  promptIsPersonal?: boolean
   originalText: string | null
   sabotageTargetName: string | null
+  waitingNames?: string[]
+  saboteursOnYou?: string[]
   yourWrite: string | null
   yourSabotage: string | null
   writeCount: number

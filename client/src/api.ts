@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client'
-import type { Lang, PublicRoom } from './types'
+import type { Lang, PromptPack, PublicRoom } from './types'
 
 const SESSION_KEY = 'sabotext-session'
 export const NAME_KEY = 'sabotext-name'
@@ -246,12 +246,19 @@ async function emitAck<T>(event: string, data: unknown): Promise<Ack<T>> {
   }
 }
 
-export function createGame(name: string, roundCount: number, hostPlays: boolean, language: Lang) {
+export function createGame(
+  name: string,
+  roundCount: number,
+  hostPlays: boolean,
+  language: Lang,
+  promptPack: PromptPack = 'mix',
+) {
   return emitAck<{ playerId: string; room: PublicRoom }>('create', {
     name,
     roundCount,
     hostPlays,
     language,
+    promptPack,
   })
 }
 
@@ -271,6 +278,10 @@ export function rejoinGame(code: string, playerId: string) {
 
 export function setRoundCount(count: number) {
   return emitAck<{ ok?: boolean }>('setRoundCount', { count })
+}
+
+export function setPromptPack(pack: PromptPack) {
+  return emitAck<{ ok?: boolean }>('setPromptPack', { pack })
 }
 
 export function setHostPlaying(playing: boolean) {

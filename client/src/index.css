@@ -1592,6 +1592,61 @@ button {
   }
 }
 
+.prompt-card.personal {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.personal-hint {
+  display: block;
+  margin-top: 0.55rem;
+  font-style: normal;
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: var(--brand-deep);
+}
+
+.pills.wrap {
+  flex-wrap: wrap;
+}
+
+.wait-fun {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.waiting-on {
+  margin: 0.25rem 0 0;
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+
+.waiting-on.center {
+  text-align: center;
+}
+
+.wait-roast {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--muted);
+  animation: share-pulse 1.8s ease-in-out infinite;
+}
+
+.saboteur-teaser {
+  margin: 0.35rem 0 0;
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, #ef4444 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, #ef4444 35%, transparent);
+  color: #9f1239;
+  font-weight: 800;
+  font-size: 0.92rem;
+}
+
 /* —— Signature rounds —— */
 .round-mode-banner {
   margin: 0 0 0.75rem;

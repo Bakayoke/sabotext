@@ -24,6 +24,7 @@ import {
   setPersistHook,
   setPublicLobby,
   setRoundCount,
+  setPromptPack,
   startGame,
   submitOriginal,
   submitSabotage,
@@ -163,7 +164,7 @@ function broadcastRoom(roomCode: string) {
 }
 
 io.on('connection', (socket) => {
-  socket.on('create', ({ name, roundCount, hostPlays, language }, ack) => {
+  socket.on('create', ({ name, roundCount, hostPlays, language, promptPack }, ack) => {
     try {
       const { room, playerId } = createRoom(
         name,
@@ -171,6 +172,8 @@ io.on('connection', (socket) => {
         socket.id,
         hostPlays !== false,
         language === 'en' ? 'en' : 'sv',
+        null,
+        promptPack,
       )
       socket.join(room.code)
       const payload = { playerId, room: toPublicRoom(room, playerId) }
@@ -236,6 +239,15 @@ io.on('connection', (socket) => {
     const binding = getBinding(socket.id)
     if (!binding) return ack?.({ error: 'Inte ansluten' })
     const result = setRoundCount(binding.code, binding.playerId, Number(count))
+    if ('error' in result) return ack?.({ error: result.error })
+    ack?.({ ok: true })
+    broadcastRoom(result.code)
+  })
+
+  socket.on('setPromptPack', ({ pack }, ack) => {
+    const binding = getBinding(socket.id)
+    if (!binding) return ack?.({ error: 'Inte ansluten' })
+    const result = setPromptPack(binding.code, binding.playerId, pack)
     if ('error' in result) return ack?.({ error: result.error })
     ack?.({ ok: true })
     broadcastRoom(result.code)

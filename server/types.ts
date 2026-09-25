@@ -6,6 +6,9 @@ export type RoomStatus = 'lobby' | 'write' | 'sabotage' | 'vote' | 'reveal' | 'f
 
 export type RoundMode = 'normal' | 'wouldSend' | 'doubleSabotage' | 'finale'
 
+/** Host-picked prompt vibe for the match */
+export type PromptPack = 'mix' | 'work' | 'dating' | 'family' | 'chaos'
+
 export type Player = {
   id: string
   name: string
@@ -73,6 +76,8 @@ export type Room = {
   language: Lang
   roundCount: number
   hostPlays: boolean
+  /** Prompt vibe for this match */
+  promptPack: PromptPack
   status: RoomStatus
   /** Prompt ids used this match (avoid repeats) */
   usedPromptIds: string[]
@@ -81,6 +86,8 @@ export type Room = {
   roundMode: RoundMode
   writerId: string | null
   prompt: Prompt | null
+  /** When set, recipient was replaced with a player name */
+  promptIsPersonal: boolean
   /** Writer order for this match */
   writerOrder: string[]
   writerIndex: number
@@ -127,6 +134,7 @@ export type PublicRoom = {
   language: Lang
   roundCount: number
   hostPlays: boolean
+  promptPack: PromptPack
   status: RoomStatus
   currentRound: number
   totalRounds: number
@@ -138,9 +146,15 @@ export type PublicRoom = {
   /** True when you have no sabotage assignment (e.g. double-sabotage victim) */
   youSkipSabotage: boolean
   prompt: { recipient: string; task: string } | null
+  /** True when recipient is a player in the room */
+  promptIsPersonal: boolean
   originalText: string | null
   /** Whose SMS you are sabotaging */
   sabotageTargetName: string | null
+  /** Names of players still finishing this phase */
+  waitingNames: string[]
+  /** Who is rewriting your SMS right now (sabotage phase) */
+  saboteursOnYou: string[]
   /** Your own write this round */
   yourWrite: string | null
   /** Your submitted sabotage text if any */

@@ -17,6 +17,7 @@ import {
   saveSession,
   setHostPlaying,
   setLanguage,
+  setPromptPack,
   setPublicLobby,
   setRoundCount,
   startGame,
@@ -30,12 +31,13 @@ import { t } from './i18n'
 import { JoinQr } from './qr'
 import { QrJoinScanner } from './qrScan'
 import { renderResultsImage } from './shareCard'
-import type { Lang, PublicRoom } from './types'
+import type { Lang, PromptPack, PublicRoom } from './types'
 import { Confetti } from './ui'
 
 type Screen = 'home' | 'join' | 'find' | 'lobby' | 'play'
 
 const ROUND_OPTIONS = [8, 10, 12, 15, 20, 25]
+const PROMPT_PACKS: PromptPack[] = ['mix', 'work', 'dating', 'family', 'chaos']
 const FACTOPIA_URL = 'https://factopia.net'
 const PARTY_PATHS_URL = 'https://partypaths.com'
 const SCOURGEBORN_URL = 'https://scourgeborn.com'
@@ -109,6 +111,7 @@ export default function App() {
   const [joinStep, setJoinStep] = useState<'code' | 'name' | 'scan'>('code')
   const [rounds, setRounds] = useState(10)
   const [lang, setLang] = useState<Lang>('sv')
+  const [promptPack, setPromptPackLocal] = useState<PromptPack>('mix')
   const [lobbies, setLobbies] = useState<PublicLobbyCard[]>([])
   const [hostPlays, setHostPlaysLocal] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -190,7 +193,7 @@ export default function App() {
     setError(null)
     setBusy(true)
     savePreferredName(name)
-    const res = await createGame(name, rounds, hostPlays, lang)
+    const res = await createGame(name, rounds, hostPlays, lang, promptPack)
     setBusy(false)
     if (res.error || !res.room || !res.playerId) {
       setError(res.error || 'Error')
@@ -276,6 +279,8 @@ export default function App() {
             roundOptions={ROUND_OPTIONS}
             lang={lang}
             setLang={setLang}
+            promptPack={promptPack}
+            setPromptPack={setPromptPackLocal}
             hostPlays={hostPlays}
             setHostPlays={setHostPlaysLocal}
             error={error}
@@ -350,6 +355,49 @@ export default function App() {
   )
 }
 
+function packLabel(s: ReturnType<typeof t>, pack: PromptPack) {
+  if (pack === 'work') return s.packWork
+  if (pack === 'dating') return s.packDating
+  if (pack === 'family') return s.packFamily
+  if (pack === 'chaos') return s.packChaos
+  return s.packMix
+}
+
+function WaitFun({
+  room,
+  s,
+  countLabel,
+}: {
+  room: PublicRoom
+  s: ReturnType<typeof t>
+  countLabel: string
+}) {
+  const waiting = room.waitingNames ?? []
+  const saboteurs = room.saboteursOnYou ?? []
+  const roastName = waiting[0]
+
+  return (
+    <div className="wait-fun">
+      <p className="muted">
+        {countLabel}
+      </p>
+      {waiting.length > 0 && (
+        <p className="waiting-on">
+          {s.waitingOn.replace('{names}', waiting.join(', '))}
+        </p>
+      )}
+      {roastName && waiting.length === 1 && (
+        <p className="wait-roast">{s.waitRoast.replace('{name}', roastName)}</p>
+      )}
+      {saboteurs.length > 0 && (
+        <p className="saboteur-teaser">
+          {s.saboteursOnYou.replace('{names}', saboteurs.join(', '))}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function Home({
   s,
   name,
@@ -359,6 +407,8 @@ function Home({
   roundOptions,
   lang,
   setLang,
+  promptPack,
+  setPromptPack,
   hostPlays,
   setHostPlays,
   error,
@@ -377,6 +427,8 @@ function Home({
   roundOptions: number[]
   lang: Lang
   setLang: (v: Lang) => void
+  promptPack: PromptPack
+  setPromptPack: (v: PromptPack) => void
   hostPlays: boolean
   setHostPlays: (v: boolean) => void
   error: string | null
@@ -519,6 +571,22 @@ function Home({
             </div>
           </label>
         </div>
+
+        <label className="field">
+          <span>{s.promptPack}</span>
+          <div className="pills wrap">
+            {PROMPT_PACKS.map((pack) => (
+              <button
+                key={pack}
+                type="button"
+                className={promptPack === pack ? 'pill on' : 'pill'}
+                onClick={() => setPromptPack(pack)}
+              >
+                {packLabel(s, pack)}
+              </button>
+            ))}
+          </div>
+        </label>
 
         <label className="check">
           <input type="checkbox" checked={hostPlays} onChange={(e) => setHostPlays(e.target.checked)} />
@@ -896,6 +964,21 @@ function Lobby({
               </div>
             </label>
           </div>
+          <label className="field">
+            <span>{s.promptPack}</span>
+            <div className="pills wrap">
+              {PROMPT_PACKS.map((pack) => (
+                <button
+                  key={pack}
+                  type="button"
+                  className={(room.promptPack ?? 'mix') === pack ? 'pill on' : 'pill'}
+                  onClick={() => void setPromptPack(pack)}
+                >
+                  {packLabel(s, pack)}
+                </button>
+              ))}
+            </div>
+          </label>
           <label className="check">
             <input
               type="checkbox"
@@ -1050,11 +1133,12 @@ function Play({
 function PromptCard({ room, s }: { room: PublicRoom; s: ReturnType<typeof t> }) {
   if (!room.prompt) return null
   return (
-    <div className="prompt-card">
+    <div className={`prompt-card${room.promptIsPersonal ? ' personal' : ''}`}>
       <span className="prompt-to">
         {s.to}: <strong>{room.prompt.recipient}</strong>
       </span>
       <p>{room.prompt.task}</p>
+      {room.promptIsPersonal && <em className="personal-hint">{s.personalPromptHint}</em>}
     </div>
   )
 }
@@ -1109,9 +1193,11 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
         <PromptCard room={room} s={s} />
         <div className="pulse-dot" />
         <h2>{s.waitingWriter}</h2>
-        <p className="muted">
-          {room.writeCount}/{room.writeNeeded}
-        </p>
+        <WaitFun
+          room={room}
+          s={s}
+          countLabel={`${room.writeCount}/${room.writeNeeded}`}
+        />
       </section>
     )
   }
@@ -1123,9 +1209,11 @@ function WritePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeo
         <PromptCard room={room} s={s} />
         <p className="ok">{s.submitted}</p>
         <h2>{s.waitingWriter}</h2>
-        <p className="muted">
-          {room.writeCount}/{room.writeNeeded}
-        </p>
+        <WaitFun
+          room={room}
+          s={s}
+          countLabel={`${room.writeCount}/${room.writeNeeded}`}
+        />
       </section>
     )
   }
@@ -1184,9 +1272,11 @@ function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<ty
         <PromptCard room={room} s={s} />
         <div className="pulse-dot" />
         <h2>{skipSabotage && !tvMode ? s.waitingDoubleVictim : s.waitingSabotage}</h2>
-        <p className="muted">
-          {room.sabotageCount}/{room.sabotageNeeded}
-        </p>
+        <WaitFun
+          room={room}
+          s={s}
+          countLabel={`${room.sabotageCount}/${room.sabotageNeeded}`}
+        />
       </section>
     )
   }
@@ -1198,9 +1288,11 @@ function SabotagePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<ty
         <PromptCard room={room} s={s} />
         <p className="ok">{s.submitted}</p>
         <h2>{s.waitingSabotage}</h2>
-        <p className="muted">
-          {room.sabotageCount}/{room.sabotageNeeded}
-        </p>
+        <WaitFun
+          room={room}
+          s={s}
+          countLabel={`${room.sabotageCount}/${room.sabotageNeeded}`}
+        />
       </section>
     )
   }
@@ -1294,6 +1386,11 @@ function VotePhase({ room, s, tvMode }: { room: PublicRoom; s: ReturnType<typeof
       <p className="muted center">
         {waiting ? s.waitingVotes : s.voted} · {room.votedCount}/{room.voterCount}
       </p>
+      {waiting && (room.waitingNames?.length ?? 0) > 0 && (
+        <p className="waiting-on center">
+          {s.waitingOn.replace('{names}', (room.waitingNames ?? []).join(', '))}
+        </p>
+      )}
       {err && <p className="error">{err}</p>}
     </section>
   )
