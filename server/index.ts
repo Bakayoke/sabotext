@@ -36,6 +36,12 @@ import { allPasses, restorePasses, setPassPersistHook } from './premium.js'
 import { buildSnapshot, flushPersist, initPersist, loadSnapshot, persistDiagnostics, scheduleSave } from './persist.js'
 import { funnelSnapshot, publicActivity, trackFunnel, type FunnelEvent } from './metrics.js'
 import { exampleHighlights, localize, todaysTheme } from './prompts.js'
+import {
+  adminTokenOk,
+  getStatsSnapshot,
+  initStats,
+  renderStatsHtml,
+} from './stats.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT) || 3001
@@ -111,6 +117,32 @@ app.post('/api/metrics', (req, res) => {
 
 app.get('/api/metrics', (_req, res) => {
   res.json(funnelSnapshot())
+})
+
+app.get('/api/admin/stats', async (req, res) => {
+  const token =
+    (typeof req.query.token === 'string' && req.query.token) ||
+    (typeof req.headers['x-admin-token'] === 'string' && req.headers['x-admin-token']) ||
+    (req.headers.authorization?.startsWith('Bearer ')
+      ? req.headers.authorization.slice(7)
+      : null)
+  if (!adminTokenOk(token)) {
+    res.status(401).json({ error: 'Unauthorized' })
+    return
+  }
+  if (!process.env.ADMIN_STATS_TOKEN?.trim()) {
+    res.status(503).json({ error: 'ADMIN_STATS_TOKEN not configured' })
+    return
+  }
+  const snap = await getStatsSnapshot()
+  const wantsHtml =
+    req.query.format === 'html' ||
+    (typeof req.headers.accept === 'string' && req.headers.accept.includes('text/html'))
+  if (wantsHtml) {
+    res.type('html').send(renderStatsHtml(snap))
+    return
+  }
+  res.json(snap)
 })
 
 app.get('/api/room/:code/preview', (req, res) => {
@@ -336,6 +368,7 @@ setInterval(() => {
 
 async function boot() {
   const persist = await initPersist()
+  const stats = await initStats()
   const persistNow = () => scheduleSave(buildSnapshot(allPasses().values(), allRooms().values()))
   setPersistHook(persistNow)
   setPassPersistHook(persistNow)
@@ -370,6 +403,7 @@ async function boot() {
     console.log(
       `Persist: ${pdiag.configured ? pdiag.backend : 'memory only'}${pdiag.hint ? ` | ${pdiag.hint}` : ''}`,
     )
+    console.log(`Stats: ${stats.name}${stats.configured ? '' : ' (ephemeral)'}`)
   })
 }
 

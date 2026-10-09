@@ -33,8 +33,11 @@ npm run dev
    - `REDIS_URL=${{Redis.REDIS_URL}}` (eller klistra in Redis-URL)
 3. Sätt bland annat:
    - `PUBLIC_APP_URL=https://sabotext.com`
+   - `ADMIN_STATS_TOKEN` = samma hemliga token som dina andra spel (valfritt men rekommenderas)
 4. Verifiera: `GET /api/health` → `persist.configured: true` + `free: true`.
    Då överlever rum (även mitt i match) redeploys.
+5. Admin-stats (startade spel per dag, ackumuleras i Redis):  
+   `GET /api/admin/stats?token=DIN_TOKEN&format=html`
 
 ### Cloudflare (frontend)
 

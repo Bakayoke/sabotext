@@ -1,6 +1,7 @@
 import { customAlphabet } from 'nanoid'
 import { localize, parsePromptPack, pickPrompts } from './prompts.js'
 import { trackFunnel } from './metrics.js'
+import { recordGameStart } from './stats.js'
 import {
   limitsFor,
   tierFromExpiry,
@@ -467,6 +468,7 @@ export function startGame(code: string, playerId: string): Room | { error: strin
   beginRound(room)
   touch(room)
   trackFunnel('game_start', code)
+  void recordGameStart()
   return room
 }
 
