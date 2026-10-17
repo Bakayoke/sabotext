@@ -109,6 +109,18 @@ let socket: Socket | null = null
 let rejoinInFlight: Promise<Ack<{ playerId: string; room: PublicRoom }>> | null = null
 let connectionListenersAttached = false
 
+function isGoneError(error?: string) {
+  if (!error) return false
+  const e = error.toLowerCase()
+  return (
+    e.includes('finns inte') ||
+    e.includes('hittades inte') ||
+    e.includes('not found') ||
+    e.includes('saknas') ||
+    e.includes('no player')
+  )
+}
+
 type ConnectionHandlers = {
   onRoom?: (room: PublicRoom) => void
   onConnection?: (connected: boolean) => void
@@ -135,8 +147,8 @@ export function getSocket() {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 800,
-      reconnectionDelayMax: 5000,
+      reconnectionDelay: 600,
+      reconnectionDelayMax: 4000,
       timeout: 20_000,
     })
   }
@@ -147,8 +159,12 @@ export function getSocket() {
       handlers.onConnection?.(true)
       void ensureSessionBound()
     })
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
       handlers.onConnection?.(false)
+      // Transport close often recovers via socket.io; keep session
+      if (reason === 'io server disconnect') {
+        socket?.connect()
+      }
     })
     socket.on('room', (room: PublicRoom) => {
       handlers.onRoom?.(room)
@@ -164,7 +180,7 @@ export function bindSocketHandlers(next: ConnectionHandlers) {
   getSocket()
 }
 
-export async function ensureSessionBound(retries = 4): Promise<Ack<{ playerId: string; room: PublicRoom }> | null> {
+export async function ensureSessionBound(retries = 5): Promise<Ack<{ playerId: string; room: PublicRoom }> | null> {
   const session = loadSession()
   if (!session) return null
   if (rejoinInFlight) return rejoinInFlight
@@ -175,18 +191,19 @@ export async function ensureSessionBound(retries = 4): Promise<Ack<{ playerId: s
     } as Ack<{ playerId: string; room: PublicRoom }>
     for (let i = 0; i < retries; i++) {
       last = await rejoinGame(session.code, session.playerId)
-      if (!last.error && last.room) {
-        saveSession(session)
+      if (!last.error && last.room && last.playerId) {
+        saveSession({
+          code: last.room.code,
+          playerId: last.playerId,
+          name: session.name,
+        })
         return last
       }
-      if (
-        last.error?.includes('finns inte') ||
-        last.error?.includes('hittades inte') ||
-        last.error?.includes('not found')
-      ) {
+      if (isGoneError(last.error)) {
+        clearSession()
         break
       }
-      await new Promise((r) => setTimeout(r, 700 * (i + 1)))
+      await new Promise((r) => setTimeout(r, 500 * (i + 1)))
     }
     return last
   })()
@@ -196,6 +213,13 @@ export async function ensureSessionBound(retries = 4): Promise<Ack<{ playerId: s
   } finally {
     rejoinInFlight = null
   }
+}
+
+/** Call when app becomes visible again (phone unlock / tab focus). */
+export function resumeSession() {
+  const s = getSocket()
+  if (!s.connected) s.connect()
+  return ensureSessionBound()
 }
 
 function whenConnected(): Promise<Socket> {

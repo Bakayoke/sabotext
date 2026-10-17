@@ -19,6 +19,7 @@ import {
   reconnectSocket,
   rematch,
   roomsNeedingTick,
+  setBroadcastHook,
   setHostPlaying,
   setLanguage,
   setPersistHook,
@@ -349,8 +350,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('disconnect', () => {
-    const room = disconnectSocket(socket.id)
-    if (room) broadcastRoom(room.code)
+    disconnectSocket(socket.id)
   })
 })
 
@@ -372,6 +372,7 @@ async function boot() {
   const persistNow = () => scheduleSave(buildSnapshot(allPasses().values(), allRooms().values()))
   setPersistHook(persistNow)
   setPassPersistHook(persistNow)
+  setBroadcastHook((code) => broadcastRoom(code))
 
   const snapshot = await loadSnapshot()
   if (snapshot) {

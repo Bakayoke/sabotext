@@ -30,7 +30,7 @@ export const REVEAL_MS = 16_000
 export const POINTS_PER_VOTE = 100
 export const FINALE_POINTS_PER_VOTE = 150
 
-const DISCONNECT_GRACE_MS = 60_000
+const DISCONNECT_GRACE_MS = 90_000
 const HOST_TRANSFER_AFTER_MS = 90_000
 const ROOM_IDLE_MS = 12 * 60 * 60 * 1000
 
@@ -39,14 +39,23 @@ const socketToPlayer = new Map<string, { code: string; playerId: string }>()
 const disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 let onPersist: (() => void) | null = null
+let onBroadcast: ((code: string) => void) | null = null
 
 export function setPersistHook(fn: (() => void) | null) {
   onPersist = fn
 }
 
+export function setBroadcastHook(fn: ((code: string) => void) | null) {
+  onBroadcast = fn
+}
+
 function touch(room?: Room) {
   if (room) room.updatedAt = Date.now()
   onPersist?.()
+}
+
+function broadcast(code: string) {
+  onBroadcast?.(code)
 }
 
 function playerKey(code: string, playerId: string) {
@@ -60,6 +69,54 @@ function cancelDisconnectTimer(code: string, playerId: string) {
     clearTimeout(t)
     disconnectTimers.delete(key)
   }
+}
+
+function hasActiveSocket(code: string, playerId: string) {
+  for (const b of socketToPlayer.values()) {
+    if (b.code === code && b.playerId === playerId) return true
+  }
+  return false
+}
+
+/** Drop prior socket→player binding (e.g. creating/joining a new room). */
+export function releaseSocket(socketId: string): string | null {
+  const prev = socketToPlayer.get(socketId)
+  if (!prev) return null
+  socketToPlayer.delete(socketId)
+  const room = rooms.get(prev.code)
+  if (!room) return prev.code
+  if (hasActiveSocket(prev.code, prev.playerId)) {
+    touch(room)
+    return prev.code
+  }
+  const player = room.players.find((p) => p.id === prev.playerId)
+  if (player?.connected) {
+    // Soft-disconnect: keep seat warm through grace
+    scheduleSoftDisconnect(room, prev.playerId)
+  }
+  touch(room)
+  return prev.code
+}
+
+function scheduleSoftDisconnect(room: Room, playerId: string) {
+  cancelDisconnectTimer(room.code, playerId)
+  const key = playerKey(room.code, playerId)
+  disconnectTimers.set(
+    key,
+    setTimeout(() => {
+      disconnectTimers.delete(key)
+      const r = rooms.get(room.code)
+      if (!r) return
+      if (hasActiveSocket(r.code, playerId)) return
+      const p = r.players.find((x) => x.id === playerId)
+      if (!p) return
+      p.connected = false
+      maybeTransferHost(r, true)
+      maybeAdvanceAfterDisconnect(r)
+      touch(r)
+      broadcast(r.code)
+    }, DISCONNECT_GRACE_MS),
+  )
 }
 
 function roomLimits(room: Room) {
@@ -97,6 +154,7 @@ export function createRoom(
   _partyToken?: string | null,
   promptPack: PromptPack = 'mix',
 ): { room: Room; playerId: string } {
+  releaseSocket(socketId)
   const limits = limitsFor()
   const count = clampRounds(roundCount, limits.roundCounts)
 
@@ -178,6 +236,41 @@ export function joinRoom(
 
   const displayName =
     name.trim().slice(0, 20) || (room.language === 'en' ? 'Player' : 'Spelare')
+
+  // Rejoining same room by name while already bound on this socket
+  const existingOnSocket = socketToPlayer.get(socketId)
+  if (existingOnSocket?.code === room.code) {
+    const existing = room.players.find((p) => p.id === existingOnSocket.playerId)
+    if (existing) {
+      cancelDisconnectTimer(room.code, existing.id)
+      existing.connected = true
+      existing.name = displayName || existing.name
+      touch(room)
+      return { room, playerId: existing.id }
+    }
+  }
+
+  // Reclaim seat by same name if they're offline, or mid-match
+  const sameName = room.players.find(
+    (p) => p.name.toLowerCase() === displayName.toLowerCase(),
+  )
+  if (
+    sameName &&
+    (!sameName.connected || (room.status !== 'lobby' && room.status !== 'finished'))
+  ) {
+    releaseSocket(socketId)
+    cancelDisconnectTimer(room.code, sameName.id)
+    for (const [sid, b] of [...socketToPlayer.entries()]) {
+      if (b.code === room.code && b.playerId === sameName.id) socketToPlayer.delete(sid)
+    }
+    sameName.connected = true
+    sameName.name = displayName
+    socketToPlayer.set(socketId, { code: room.code, playerId: sameName.id })
+    touch(room)
+    return { room, playerId: sameName.id }
+  }
+
+  releaseSocket(socketId)
 
   const maxPlayers = roomLimits(room).maxPlayers
   if (maxPlayers > 0 && room.players.length >= maxPlayers) {
@@ -602,20 +695,41 @@ function beginRound(room: Room) {
   }
 
   const connectedPlaying = playingPlayers(room).filter((p) => p.connected)
+  // Don't nuke a live match on a brief blip — only end if almost nobody is left
   if (connectedPlaying.length < 2) {
-    room.status = 'finished'
-    room.endsAt = 0
-    trackFunnel('game_finished', room.code)
-    return
+    const waitingGrace = playingPlayers(room).some((p) =>
+      disconnectTimers.has(playerKey(room.code, p.id)),
+    )
+    if (!waitingGrace) {
+      room.status = 'finished'
+      room.endsAt = 0
+      trackFunnel('game_finished', room.code)
+      return
+    }
+    // Keep going with whoever is still connected + in grace (treat grace as present)
+    const effective = playingPlayers(room).filter(
+      (p) => p.connected || disconnectTimers.has(playerKey(room.code, p.id)),
+    )
+    if (effective.length < 2) {
+      room.status = 'finished'
+      room.endsAt = 0
+      trackFunnel('game_finished', room.code)
+      return
+    }
   }
 
-  room.writerOrder = shuffle(connectedPlaying.map((p) => p.id))
+  const roundPlayers = playingPlayers(room).filter(
+    (p) => p.connected || disconnectTimers.has(playerKey(room.code, p.id)),
+  )
+  const roster = roundPlayers.length >= 2 ? roundPlayers : connectedPlaying
+
+  room.writerOrder = shuffle(roster.map((p) => p.id))
   room.writerIndex = 0
   room.writerId = null
   room.roundMode = pickRoundMode(
     room.currentRound,
     room.roundCount,
-    connectedPlaying.length,
+    roster.length,
   )
 
   const exclude = new Set(room.usedPromptIds)
@@ -624,8 +738,8 @@ function beginRound(room: Room) {
   room.promptIsPersonal = false
 
   // ~40%: make the SMS recipient someone in the room
-  if (prompt && connectedPlaying.length >= 2 && Math.random() < 0.4) {
-    const star = connectedPlaying[Math.floor(Math.random() * connectedPlaying.length)]!
+  if (prompt && roster.length >= 2 && Math.random() < 0.4) {
+    const star = roster[Math.floor(Math.random() * roster.length)]!
     prompt = {
       ...prompt,
       recipient: { sv: star.name, en: star.name },
@@ -941,42 +1055,49 @@ export function reconnectSocket(
   const player = room.players.find((p) => p.id === playerId)
   if (!player) return { error: 'Spelaren hittades inte' }
 
-  cancelDisconnectTimer(code, playerId)
+  cancelDisconnectTimer(room.code, playerId)
+
+  // Drop any stale bindings for this player (old tab / previous socket)
+  for (const [sid, b] of [...socketToPlayer.entries()]) {
+    if (b.code === room.code && b.playerId === playerId && sid !== socketId) {
+      socketToPlayer.delete(sid)
+    }
+  }
+  // Also clear if this socket was bound to someone else
+  const prev = socketToPlayer.get(socketId)
+  if (prev && (prev.code !== room.code || prev.playerId !== playerId)) {
+    socketToPlayer.delete(socketId)
+  }
+
   player.connected = true
   socketToPlayer.set(socketId, { code: room.code, playerId })
   touch(room)
   return room
 }
 
-export function disconnectSocket(socketId: string) {
+export function disconnectSocket(socketId: string): void {
   const binding = socketToPlayer.get(socketId)
-  if (!binding) return null
-  socketToPlayer.delete(socketId)
+  if (!binding) return
 
   const room = rooms.get(binding.code)
-  if (!room) return null
-  const player = room.players.find((p) => p.id === binding.playerId)
-  if (!player) return null
+  if (!room) {
+    socketToPlayer.delete(socketId)
+    return
+  }
+  if (!room.players.some((p) => p.id === binding.playerId)) {
+    socketToPlayer.delete(socketId)
+    return
+  }
 
-  const key = playerKey(binding.code, binding.playerId)
-  cancelDisconnectTimer(binding.code, binding.playerId)
-  disconnectTimers.set(
-    key,
-    setTimeout(() => {
-      disconnectTimers.delete(key)
-      const r = rooms.get(binding.code)
-      if (!r) return
-      const p = r.players.find((x) => x.id === binding.playerId)
-      if (!p || p.connected) return
-      maybeTransferHost(r, true)
-      touch(r)
-    }, DISCONNECT_GRACE_MS),
-  )
+  // A newer socket already owns this seat — ignore the stale disconnect.
+  socketToPlayer.delete(socketId)
+  if (hasActiveSocket(binding.code, binding.playerId)) {
+    return
+  }
 
-  player.connected = false
-  maybeTransferHost(room)
+  // Keep connected=true during grace so UI doesn't flap and mid-match doesn't end
+  scheduleSoftDisconnect(room, binding.playerId)
   touch(room)
-  return room
 }
 
 function maybeTransferHost(room: Room, force = false) {
@@ -985,6 +1106,35 @@ function maybeTransferHost(room: Room, force = false) {
   if (!force && Date.now() - room.updatedAt < HOST_TRANSFER_AFTER_MS) return
   const next = room.players.find((p) => p.connected && p.id !== room.hostId)
   if (next) room.hostId = next.id
+}
+
+function maybeAdvanceAfterDisconnect(room: Room) {
+  if (room.status === 'write') {
+    const needed = writers(room)
+    if (
+      needed.length >= 2 &&
+      needed.every((p) => room.submissions.some((s) => s.authorId === p.id && s.isOriginal))
+    ) {
+      enterSabotage(room)
+    }
+    return
+  }
+  if (room.status === 'sabotage') {
+    const needed = saboteurPlayers(room)
+    if (
+      needed.length >= 1 &&
+      needed.every((p) => room.submissions.some((s) => s.authorId === p.id && !s.isOriginal))
+    ) {
+      enterVote(room)
+    }
+    return
+  }
+  if (room.status === 'vote') {
+    const voters = voteEligible(room)
+    if (voters.length > 0 && voters.every((p) => room.votes[p.id])) {
+      resolveVote(room)
+    }
+  }
 }
 
 export function pruneIdleRooms() {

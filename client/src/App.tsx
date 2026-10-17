@@ -12,6 +12,7 @@ import {
   loadPreferredName,
   loadSession,
   rematchGame,
+  resumeSession,
   saveGang,
   savePreferredName,
   saveSession,
@@ -179,14 +180,35 @@ export default function App() {
     void (async () => {
       const session = loadSession()
       if (!session) return
+      // Don't yank into an old room when opening a join link for another code
+      if (deepLink.length === 4 && session.code !== deepLink) return
       setName(session.name)
       const res = await ensureSessionBound()
-      if (res && !res.error && res.room) {
+      if (res && !res.error && res.room && res.playerId) {
         setPlayerId(res.playerId)
         setRoom(res.room)
         setScreen(res.room.status === 'lobby' ? 'lobby' : 'play')
+      } else if (res?.error) {
+        // Stale session already cleared inside ensureSessionBound when gone
+        if (!loadSession()) {
+          setPlayerId(null)
+          setRoom(null)
+        }
       }
     })()
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void resumeSession()
+    }
+    const onPageShow = () => {
+      void resumeSession()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('pageshow', onPageShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('pageshow', onPageShow)
+    }
   }, [])
 
   async function handleCreate() {
