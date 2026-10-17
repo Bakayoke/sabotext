@@ -48,6 +48,18 @@ const YOUR_TASK_IS_URL = 'https://yourtaskis.com'
 const KLOTTERKAOS_URL = 'https://klotterkaos.com'
 const KLUDDKRIG_URL = 'https://kluddkrig.com'
 const PULSEKAOS_URL = 'https://pulskaos.com'
+/** National format for Swish deep links (+46 730 457 930). */
+const SWISH_NUMBER = '0730457930'
+
+function swishPaymentUrl(message: string, amountSek = 35) {
+  const data = {
+    version: 1,
+    payee: { value: SWISH_NUMBER },
+    amount: { value: amountSek, editable: true },
+    message: { value: message.slice(0, 50), editable: true },
+  }
+  return `swish://payment?data=${encodeURIComponent(JSON.stringify(data))}`
+}
 
 function joinUrl(code: string) {
   const url = new URL(window.location.origin)
@@ -492,6 +504,7 @@ function Home({
 }) {
   const [homeData, setHomeData] = useState<HomePayload | null>(null)
   const [tipFlash, setTipFlash] = useState('')
+  const [fikaFlash, setFikaFlash] = useState('')
   const [savedGang] = useState(() => loadGang())
 
   useEffect(() => {
@@ -515,6 +528,17 @@ function Home({
     } catch {
       // ignore
     }
+  }
+
+  async function buyFika() {
+    try {
+      await navigator.clipboard.writeText(SWISH_NUMBER)
+      setFikaFlash(s.buyFikaCopied)
+      setTimeout(() => setFikaFlash(''), 2500)
+    } catch {
+      // ignore — still try to open Swish
+    }
+    window.location.href = swishPaymentUrl(s.buyFikaMessage)
   }
 
   const examples = homeData?.examples?.slice(0, 2) ?? []
@@ -666,6 +690,10 @@ function Home({
 
       <button type="button" className="btn tip-friend" onClick={() => void tipFriend()}>
         {tipFlash || s.tipFriend}
+      </button>
+
+      <button type="button" className="btn ghost buy-fika" onClick={() => void buyFika()}>
+        {fikaFlash || s.buyFika}
       </button>
 
       <p className="footer-note dns-hint">{s.dnsHint}</p>
