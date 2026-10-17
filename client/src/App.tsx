@@ -8,6 +8,7 @@ import {
   fetchHome,
   fetchLobbies,
   joinGame,
+  leaveGame,
   loadGang,
   loadPreferredName,
   loadSession,
@@ -20,6 +21,7 @@ import {
   setLanguage,
   setPromptPack,
   setPublicLobby,
+  setRejoinPolicy,
   setRoundCount,
   startGame,
   submitOriginal,
@@ -168,6 +170,12 @@ export default function App() {
     const unlock = params.get('unlock')?.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4)
     const deepLink = (join || unlock || '').slice(0, 4)
     if (deepLink.length === 4) {
+      const existing = loadSession()
+      if (existing && existing.code !== deepLink) {
+        // Joining another room — don't restore the old session in the background
+        clearSession()
+      }
+      setRejoinPolicy({ mode: 'off' })
       setJoinCode(deepLink)
       setJoinStep(loadPreferredName() ? 'name' : 'code')
       setScreen('join')
@@ -180,9 +188,9 @@ export default function App() {
     void (async () => {
       const session = loadSession()
       if (!session) return
-      // Don't yank into an old room when opening a join link for another code
       if (deepLink.length === 4 && session.code !== deepLink) return
       setName(session.name)
+      setRejoinPolicy({ mode: 'auto' })
       const res = await ensureSessionBound()
       if (res && !res.error && res.room && res.playerId) {
         setPlayerId(res.playerId)
@@ -222,6 +230,7 @@ export default function App() {
       return
     }
     saveSession({ code: res.room.code, playerId: res.playerId, name: name.trim() || 'Spelare' })
+    setRejoinPolicy({ mode: 'auto' })
     setPlayerId(res.playerId)
     setRoom(res.room)
     setTvMode(!hostPlays)
@@ -238,6 +247,11 @@ export default function App() {
     setError(null)
     setBusy(true)
     savePreferredName(name)
+    const existing = loadSession()
+    if (existing && existing.code !== joinCode.toUpperCase()) {
+      clearSession()
+    }
+    setRejoinPolicy({ mode: 'off' })
     const res = await joinGame(joinCode, name)
     setBusy(false)
     if (res.code === 'ROOM_FULL' || (res.error && res.error.toLowerCase().includes('fullt'))) {
@@ -249,6 +263,7 @@ export default function App() {
       return
     }
     saveSession({ code: res.room.code, playerId: res.playerId, name: name.trim() || 'Spelare' })
+    setRejoinPolicy({ mode: 'auto' })
     setPlayerId(res.playerId)
     setRoom(res.room)
     setScreen(res.room.status === 'lobby' ? 'lobby' : 'play')
@@ -256,6 +271,14 @@ export default function App() {
 
   function openJoin(code?: string) {
     setError(null)
+    const target = code?.toUpperCase()
+    const existing = loadSession()
+    if (target && existing && existing.code !== target) {
+      clearSession()
+      setRejoinPolicy({ mode: 'off' })
+    } else if (!target) {
+      setRejoinPolicy({ mode: 'off' })
+    }
     if (code) {
       setJoinCode(code)
       setJoinStep('name')
@@ -271,8 +294,8 @@ export default function App() {
     setScreen('find')
   }
 
-  function leave() {
-    clearSession()
+  async function leave() {
+    await leaveGame()
     setRoom(null)
     setPlayerId(null)
     setTvMode(false)
@@ -331,7 +354,10 @@ export default function App() {
               setError(null)
               if (joinStep === 'name') setJoinStep('code')
               else if (joinStep === 'scan') setJoinStep('code')
-              else setScreen('home')
+              else {
+                setRejoinPolicy({ mode: 'auto' })
+                setScreen('home')
+              }
             }}
           />
         )}
@@ -344,7 +370,10 @@ export default function App() {
             onQuickJoin={() => {
               if (lobbies[0]) openJoin(lobbies[0].code)
             }}
-            onBack={() => setScreen('home')}
+            onBack={() => {
+              setRejoinPolicy({ mode: 'auto' })
+              setScreen('home')
+            }}
           />
         )}
 

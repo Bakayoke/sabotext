@@ -12,6 +12,7 @@ import {
   getRoom,
   hydrateRooms,
   joinRoom,
+  leaveRoom,
   liveActivity,
   listPublicLobbies,
   onPhaseTimeout,
@@ -266,6 +267,20 @@ io.on('connection', (socket) => {
     } catch {
       ack?.({ error: 'Kunde inte återansluta' })
     }
+  })
+
+  socket.on('leave', (_data, ack) => {
+    const binding = getBinding(socket.id)
+    if (!binding) {
+      ack?.({ ok: true })
+      return
+    }
+    const code = binding.code
+    const result = leaveRoom(code, binding.playerId, socket.id)
+    if ('error' in result) return ack?.({ error: result.error })
+    void socket.leave(code)
+    ack?.({ ok: true })
+    if (!result.empty) broadcastRoom(code)
   })
 
   socket.on('setRoundCount', ({ count }, ack) => {

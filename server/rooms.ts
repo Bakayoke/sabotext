@@ -250,14 +250,19 @@ export function joinRoom(
     }
   }
 
-  // Reclaim seat by same name if they're offline, or mid-match
+  // Reclaim seat only if that name is offline (never steal an active seat)
   const sameName = room.players.find(
     (p) => p.name.toLowerCase() === displayName.toLowerCase(),
   )
-  if (
-    sameName &&
-    (!sameName.connected || (room.status !== 'lobby' && room.status !== 'finished'))
-  ) {
+  if (sameName?.connected) {
+    return {
+      error:
+        room.language === 'en'
+          ? 'That name is already in the room'
+          : 'Namnet är redan upptaget i rummet',
+    }
+  }
+  if (sameName && !sameName.connected) {
     releaseSocket(socketId)
     cancelDisconnectTimer(room.code, sameName.id)
     for (const [sid, b] of [...socketToPlayer.entries()]) {
@@ -265,6 +270,10 @@ export function joinRoom(
     }
     sameName.connected = true
     sameName.name = displayName
+    // Mid-match reclaim: they were already playing; lobby/finished: ensure they play
+    if (room.status === 'lobby' || room.status === 'finished') {
+      sameName.playing = true
+    }
     socketToPlayer.set(socketId, { code: room.code, playerId: sameName.id })
     touch(room)
     return { room, playerId: sameName.id }
@@ -1073,6 +1082,52 @@ export function reconnectSocket(
   socketToPlayer.set(socketId, { code: room.code, playerId })
   touch(room)
   return room
+}
+
+/** Explicit leave — drop seat immediately (no grace). */
+export function leaveRoom(
+  code: string,
+  playerId: string,
+  socketId?: string,
+): { empty: true } | { empty: false; room: Room } | { error: string } {
+  const room = rooms.get(code.toUpperCase().trim())
+  if (!room) return { error: 'Rummet finns inte' }
+  const player = room.players.find((p) => p.id === playerId)
+  if (!player) return { error: 'Spelaren hittades inte' }
+
+  cancelDisconnectTimer(room.code, playerId)
+  if (socketId) socketToPlayer.delete(socketId)
+  for (const [sid, b] of [...socketToPlayer.entries()]) {
+    if (b.code === room.code && b.playerId === playerId) socketToPlayer.delete(sid)
+  }
+
+  if (room.status === 'lobby' || room.status === 'finished') {
+    room.players = room.players.filter((p) => p.id !== playerId)
+    room.waitlist = room.waitlist.filter((w) => w.name.toLowerCase() !== player.name.toLowerCase())
+    if (!room.players.length) {
+      rooms.delete(room.code)
+      return { empty: true }
+    }
+    if (room.hostId === playerId) {
+      const next =
+        room.players.find((p) => p.connected) ?? room.players[0]
+      if (next) room.hostId = next.id
+    }
+  } else {
+    player.connected = false
+    player.playing = false
+    if (room.hostId === playerId) {
+      const next =
+        room.players.find((p) => p.connected && p.playing) ??
+        room.players.find((p) => p.connected) ??
+        room.players.find((p) => p.id !== playerId)
+      if (next) room.hostId = next.id
+    }
+    maybeAdvanceAfterDisconnect(room)
+  }
+
+  touch(room)
+  return { empty: false, room }
 }
 
 export function disconnectSocket(socketId: string): void {

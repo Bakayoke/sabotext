@@ -106,8 +106,16 @@ export function clearGang() {
 }
 
 let socket: Socket | null = null
-let rejoinInFlight: Promise<Ack<{ playerId: string; room: PublicRoom }>> | null = null
+let rejoinInFlight: Promise<Ack<{ playerId: string; room: PublicRoom }> | null> | null = null
 let connectionListenersAttached = false
+
+/** Controls whether connect/resume may auto-rejoin a saved session. */
+type RejoinPolicy = { mode: 'auto' } | { mode: 'off' } | { mode: 'only'; code: string }
+let rejoinPolicy: RejoinPolicy = { mode: 'auto' }
+
+export function setRejoinPolicy(policy: RejoinPolicy) {
+  rejoinPolicy = policy
+}
 
 function isGoneError(error?: string) {
   if (!error) return false
@@ -183,6 +191,8 @@ export function bindSocketHandlers(next: ConnectionHandlers) {
 export async function ensureSessionBound(retries = 5): Promise<Ack<{ playerId: string; room: PublicRoom }> | null> {
   const session = loadSession()
   if (!session) return null
+  if (rejoinPolicy.mode === 'off') return null
+  if (rejoinPolicy.mode === 'only' && session.code !== rejoinPolicy.code) return null
   if (rejoinInFlight) return rejoinInFlight
 
   rejoinInFlight = (async () => {
@@ -205,7 +215,7 @@ export async function ensureSessionBound(retries = 5): Promise<Ack<{ playerId: s
       }
       await new Promise((r) => setTimeout(r, 500 * (i + 1)))
     }
-    return last
+    return last.error ? last : null
   })()
 
   try {
@@ -256,7 +266,7 @@ type Ack<T> = T & { error?: string }
 async function emitAck<T>(event: string, data: unknown): Promise<Ack<T>> {
   try {
     const s = await whenConnected()
-    if (event !== 'create' && event !== 'join' && event !== 'rejoin') {
+    if (event !== 'create' && event !== 'join' && event !== 'rejoin' && event !== 'leave') {
       await ensureSessionBound(2)
     }
     return await new Promise<Ack<T>>((resolve) => {
@@ -298,6 +308,17 @@ export function joinGame(code: string, name: string) {
 
 export function rejoinGame(code: string, playerId: string) {
   return emitAck<{ playerId: string; room: PublicRoom }>('rejoin', { code, playerId })
+}
+
+export async function leaveGame() {
+  setRejoinPolicy({ mode: 'off' })
+  try {
+    await emitAck<{ ok?: boolean }>('leave', {})
+  } catch {
+    // ignore
+  }
+  clearSession()
+  setRejoinPolicy({ mode: 'auto' })
 }
 
 export function setRoundCount(count: number) {
