@@ -1983,17 +1983,6 @@ button {
   filter: brightness(1.05);
 }
 
-.buy-fika {
-  display: block;
-  width: 100%;
-  margin-top: 0.35rem;
-  font-weight: 600;
-  opacity: 0.9;
-  text-align: center;
-  text-decoration: none;
-  box-sizing: border-box;
-}
-
 .join-steps {
   display: flex;
   flex-direction: column;

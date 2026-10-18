@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useEffect, useState } from 'react'
 import {
   bindSocketHandlers,
   castVote,
@@ -48,31 +48,6 @@ const YOUR_TASK_IS_URL = 'https://yourtaskis.com'
 const KLOTTERKAOS_URL = 'https://klotterkaos.com'
 const KLUDDKRIG_URL = 'https://kluddkrig.com'
 const PULSEKAOS_URL = 'https://pulskaos.com'
-/** Swish payee: national + E.164 without + (+46 730 457 930). */
-const SWISH_NUMBER = '0730457930'
-const SWISH_NUMBER_E164 = '46730457930'
-
-/** Official Swish link — opens the app on phone, fallback page on desktop. */
-function swishHttpsUrl(message: string, amountSek = 35) {
-  const params = new URLSearchParams({
-    sw: SWISH_NUMBER_E164,
-    amt: String(amountSek),
-    msg: message.slice(0, 50),
-    edit: 'amt,msg',
-  })
-  return `https://app.swish.nu/1/p/sw/?${params.toString()}`
-}
-
-/** Native scheme — most reliable when tapped with an unbroken user gesture. */
-function swishAppUrl(message: string, amountSek = 35) {
-  const data = {
-    version: 1,
-    payee: { value: SWISH_NUMBER },
-    amount: { value: amountSek, editable: true },
-    message: { value: message.slice(0, 50), editable: true },
-  }
-  return `swish://payment?data=${encodeURIComponent(JSON.stringify(data))}`
-}
 
 function joinUrl(code: string) {
   const url = new URL(window.location.origin)
@@ -517,7 +492,6 @@ function Home({
 }) {
   const [homeData, setHomeData] = useState<HomePayload | null>(null)
   const [tipFlash, setTipFlash] = useState('')
-  const [fikaFlash, setFikaFlash] = useState('')
   const [savedGang] = useState(() => loadGang())
 
   useEffect(() => {
@@ -541,26 +515,6 @@ function Home({
     } catch {
       // ignore
     }
-  }
-
-  function buyFika(e: MouseEvent<HTMLAnchorElement>) {
-    // Must open Swish inside the tap gesture — no await before navigation.
-    const appUrl = swishAppUrl(s.buyFikaMessage)
-    const httpsUrl = swishHttpsUrl(s.buyFikaMessage)
-    e.preventDefault()
-    window.location.href = appUrl
-    // If the custom scheme does nothing (desktop / no app), fall back shortly.
-    window.setTimeout(() => {
-      if (document.visibilityState === 'visible') {
-        window.location.href = httpsUrl
-      }
-    }, 700)
-    void navigator.clipboard.writeText(SWISH_NUMBER).then(() => {
-      setFikaFlash(s.buyFikaCopied)
-      window.setTimeout(() => setFikaFlash(''), 2500)
-    }).catch(() => {
-      // ignore
-    })
   }
 
   const examples = homeData?.examples?.slice(0, 2) ?? []
@@ -713,14 +667,6 @@ function Home({
       <button type="button" className="btn tip-friend" onClick={() => void tipFriend()}>
         {tipFlash || s.tipFriend}
       </button>
-
-      <a
-        className="btn ghost buy-fika"
-        href={swishHttpsUrl(s.buyFikaMessage)}
-        onClick={buyFika}
-      >
-        {fikaFlash || s.buyFika}
-      </a>
 
       <p className="footer-note dns-hint">{s.dnsHint}</p>
 
